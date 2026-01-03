@@ -1,26 +1,70 @@
 // kaj-kor/app/(dashboard)/progress.jsx
 import React from "react"
 import { View, Text, StyleSheet, ScrollView } from "react-native"
+import axios from "axios"
 
-export default function ProgressScreen({ targets = [] }) {
+
+const API = axios.create({
+  baseURL: "http://192.168.10.116:5000/progress",
+})
+export default function ProgressScreen() {
     const now = new Date()
+    const [targets, setTargets] = React.useState([])
+React.useEffect(() => {
+  const fetchProgress = async () => {
+    try {
+      const res = await API.get("/")
+      setTargets(res.data)
+    } catch (err) {
+      console.log("[PROGRESS FETCH ERROR]", err.message)
+    }
+  }
 
-    const totalTargets = targets.length
+  fetchProgress()
+}, [])
 
-    const totalUnits = targets.reduce((sum, t) => sum + t.total, 0)
-    const completedUnits = targets.reduce((sum, t) => sum + t.completed, 0)
 
-    const dueTargets = targets.filter(
-        (t) => t.deadline && t.deadline > now
-    ).length
+   //  const totalTargets = normalizeTargets.length
 
-    const missedDeadlines = targets.filter(
-        (t) => t.deadline && t.deadline < now && t.completed < t.total
-    ).length
 
-    const completedTargets = targets.filter(
-        (t) => t.completed >= t.total
-    ).length
+   //  const totalUnits = targets.reduce((sum, t) => sum + t.total, 0)
+
+    //const completedUnits = targets.reduce((sum, t) => sum + t.completed, 0)
+// 1️⃣ Normalize FIRST
+const normalizeTargets = targets.map(t => ({
+  ...t,
+  deadline: t.deadline ? new Date(t.deadline) : null,
+}))
+
+// 2️⃣ Then derive stats
+const totalTargets = normalizeTargets.length
+
+const totalUnits = normalizeTargets.reduce(
+  (sum, t) => sum + (t.total || 0),
+  0
+)
+
+const completedUnits = normalizeTargets.reduce(
+  (sum, t) => sum + (t.completed || 0),
+  0)
+
+   //  const dueTargets = targets.filter(
+   //      (t) => t.deadline && t.deadline > now
+   //  ).length
+const dueTargets = normalizeTargets.filter(
+  (t) => t.deadline && t.deadline > now
+).length
+
+
+const missedDeadlines = normalizeTargets.filter(
+  (t) => t.deadline && t.deadline < now && t.completed < t.total
+).length
+
+
+const completedTargets = normalizeTargets.filter(
+  (t) => t.completed >= t.total
+).length
+
 
     const completionRate =
         totalUnits === 0

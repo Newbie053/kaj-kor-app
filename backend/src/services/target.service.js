@@ -1,3 +1,4 @@
+// backend/src/services/target.service.js
 const { Target } = require('../models');
 
 exports.getAll = async () => await Target.findAll();

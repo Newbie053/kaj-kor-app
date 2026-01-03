@@ -1,3 +1,4 @@
+// backend/src/services/progress.service.js
 const { Target } = require('../models');
 
 exports.getProgress = async () => {

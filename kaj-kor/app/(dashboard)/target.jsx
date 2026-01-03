@@ -2,6 +2,7 @@
 // kaj-kor/app/(dashboard)/target.jsx
 import React, { useState } from "react"
 import DateTimePicker from "@react-native-community/datetimepicker"
+import axios from "axios"
 
 import {
     View,
@@ -12,8 +13,24 @@ import {
     FlatList,
 } from "react-native"
 
+const API = axios.create({
+  baseURL: "http://192.168.10.116:5000/targets",
+})
 const TargetScreen = () => {
     const [targets, setTargets] = useState([])
+    React.useEffect(() => {
+  const fetchTargets = async () => {
+    try {
+      const res = await API.get("/")
+      setTargets(res.data)
+    } catch (err) {
+      console.log("[TARGET FETCH ERROR]", err.message)
+    }
+  }
+
+  fetchTargets()
+}, [])
+
 
     const [title, setTitle] = useState("")
     const [type, setType] = useState("Playlist") // Playlist | Course | Book
@@ -45,53 +62,99 @@ const TargetScreen = () => {
 
     // ---- ACTIONS ----
 
-    const addTarget = () => {
-        if (!title || !totalUnits) return
+   //  const addTarget = () => {
+   //      if (!title || !totalUnits) return
 
-        const parsedDeadline = deadlineInput
-            ? (() => {
-                const [dd, mm, yyyy] = deadlineInput.split("/")
-                return new Date(yyyy, mm - 1, dd)
-            })()
-            : null
+   //      const parsedDeadline = deadlineInput
+   //          ? (() => {
+   //              const [dd, mm, yyyy] = deadlineInput.split("/")
+   //              return new Date(yyyy, mm - 1, dd)
+   //          })()
+   //          : null
 
 
-        setTargets((prev) => [
-            ...prev,
-            {
-                id: Date.now().toString(),
-                title: title.trim(),
-                description: description.trim(),
-                type,
-                total: Number(totalUnits),
-                completed: 0,
-                deadline: parsedDeadline,
-            },
+   //      setTargets((prev) => [
+   //          ...prev,
+   //          {
+   //              id: Date.now().toString(),
+   //              title: title.trim(),
+   //              description: description.trim(),
+   //              type,
+   //              total: Number(totalUnits),
+   //              completed: 0,
+   //              deadline: parsedDeadline,
+   //          },
 
-        ])
+   //      ])
 
-        setTitle("")
-        setTotalUnits("")
-        setDeadlineInput("")
-        setDescription("")
+   //      setTitle("")
+   //      setTotalUnits("")
+   //      setDeadlineInput("")
+   //      setDescription("")
 
-    }
+   //  }
 
-    const incrementProgress = (id) => {
-        setTargets((prev) =>
-            prev.map((t) =>
-                t.id === id && t.completed < t.total
-                    ? { ...t, completed: t.completed + 1 }
-                    : t
-            )
-        )
-    }
+
+   const addTarget = async () => {
+  if (!title || !totalUnits) return
+
+  const deadline = deadlineInput
+    ? (() => {
+        const [dd, mm, yyyy] = deadlineInput.split("/")
+        return new Date(yyyy, mm - 1, dd)
+      })()
+    : null
+
+  const payload = {
+    title: title.trim(),
+    description: description.trim(),
+    type,
+    total: Number(totalUnits),
+    completed: 0,
+    deadline,
+  }
+
+  try {
+    const res = await API.post("/", payload)
+    setTargets((prev) => [...prev, res.data])
+
+    setTitle("")
+    setTotalUnits("")
+    setDeadlineInput("")
+    setDescription("")
+  } catch (err) {
+    console.log("[ADD TARGET ERROR]", err.message)
+  }
+}
+
+   //  const incrementProgress = (id) => {
+   //      setTargets((prev) =>
+   //          prev.map((t) =>
+   //              t.id === id && t.completed < t.total
+   //                  ? { ...t, completed: t.completed + 1 }
+   //                  : t
+   //          )
+   //      )
+   //  }
 
     // ---- RENDER ----
 
+    const incrementProgress = async (id) => {
+  try {
+    const res = await API.patch(`/${id}/increment`)
+    setTargets((prev) =>
+      prev.map((t) => (t.id === id ? res.data : t))
+    )
+  } catch (err) {
+    console.log("[INCREMENT ERROR]", err.message)
+  }
+}
+
     const renderItem = ({ item }) => {
         const percent = Math.round((item.completed / item.total) * 100)
-        const remaining = getRemainingTime(item.deadline)
+        const deadlineDate = item.deadline ? new Date(item.deadline) : null
+const remaining = deadlineDate ? getRemainingTime(deadlineDate) : null
+
 
         return (
             <View style={styles.card}>
@@ -125,7 +188,8 @@ const TargetScreen = () => {
                 {item.deadline && (
                     <Text style={styles.deadline}>
                         ⏳ {remaining} (by{" "}
-                        {item.deadline.toDateString()})
+                       {deadlineDate.toDateString()}
+
                     </Text>
                 )}
 
