@@ -1,179 +1,261 @@
 // kaj-kor/app/(dashboard)/progress.jsx
 import React from "react"
-import { View, Text, StyleSheet, ScrollView } from "react-native"
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Dimensions,
+} from "react-native"
 import axios from "axios"
-
+import { ProgressChart } from "react-native-chart-kit"
 
 const API = axios.create({
   baseURL: "http://192.168.10.116:5000/progress",
 })
+
+const screenWidth = Dimensions.get("window").width
+
 export default function ProgressScreen() {
-    const now = new Date()
-    const [targets, setTargets] = React.useState([])
-React.useEffect(() => {
-  const fetchProgress = async () => {
-    try {
-      const res = await API.get("/")
-      setTargets(res.data)
-    } catch (err) {
-      console.log("[PROGRESS FETCH ERROR]", err.message)
+  const now = new Date()
+  const [targets, setTargets] = React.useState([])
+
+  React.useEffect(() => {
+    const fetchProgress = async () => {
+      try {
+        const res = await API.get("/")
+        setTargets(res.data)
+      } catch (err) {
+        console.log("[PROGRESS FETCH ERROR]", err.message)
+      }
     }
-  }
 
-  fetchProgress()
-}, [])
+    fetchProgress()
+  }, [])
 
+  // 1️⃣ Normalize
+  const normalizeTargets = targets.map((t) => ({
+    ...t,
+    deadline: t.deadline ? new Date(t.deadline) : null,
+  }))
 
-   //  const totalTargets = normalizeTargets.length
+  // 2️⃣ Metrics
+  const totalTargets = normalizeTargets.length
 
+  const totalUnits = normalizeTargets.reduce(
+    (sum, t) => sum + (t.total || 0),
+    0
+  )
 
-   //  const totalUnits = targets.reduce((sum, t) => sum + t.total, 0)
+  const completedUnits = normalizeTargets.reduce(
+    (sum, t) => sum + (t.completed || 0),
+    0
+  )
 
-    //const completedUnits = targets.reduce((sum, t) => sum + t.completed, 0)
-// 1️⃣ Normalize FIRST
-const normalizeTargets = targets.map(t => ({
-  ...t,
-  deadline: t.deadline ? new Date(t.deadline) : null,
-}))
+  const completedTargets = normalizeTargets.filter(
+    (t) => t.completed >= t.total
+  ).length
 
-// 2️⃣ Then derive stats
-const totalTargets = normalizeTargets.length
+  const dueTargets = normalizeTargets.filter(
+    (t) => t.deadline && t.deadline > now
+  ).length
 
-const totalUnits = normalizeTargets.reduce(
-  (sum, t) => sum + (t.total || 0),
-  0
-)
+  const missedDeadlines = normalizeTargets.filter(
+    (t) => t.deadline && t.deadline < now && t.completed < t.total
+  ).length
 
-const completedUnits = normalizeTargets.reduce(
-  (sum, t) => sum + (t.completed || 0),
-  0)
+  const completionRate =
+    totalUnits === 0
+      ? 0
+      : Math.round((completedUnits / totalUnits) * 100)
 
-   //  const dueTargets = targets.filter(
-   //      (t) => t.deadline && t.deadline > now
-   //  ).length
-const dueTargets = normalizeTargets.filter(
-  (t) => t.deadline && t.deadline > now
-).length
+  // Learning speed
+  const firstStartDate = normalizeTargets
+    .map((t) => t.deadline)
+    .filter(Boolean)
+    .sort()[0]
 
-
-const missedDeadlines = normalizeTargets.filter(
-  (t) => t.deadline && t.deadline < now && t.completed < t.total
-).length
-
-
-const completedTargets = normalizeTargets.filter(
-  (t) => t.completed >= t.total
-).length
-
-
-    const completionRate =
-        totalUnits === 0
-            ? 0
-            : Math.round((completedUnits / totalUnits) * 100)
-
-    // ---- Learning speed (units/day) ----
-    const firstStartDate = targets
-        .map((t) => t.deadline)
-        .filter(Boolean)
-        .sort()[0]
-
-    const daysPassed = firstStartDate
-        ? Math.max(
-            1,
-            Math.floor(
-                (now - new Date(firstStartDate)) /
-                (1000 * 60 * 60 * 24)
-            )
+  const daysPassed = firstStartDate
+    ? Math.max(
+        1,
+        Math.floor(
+          (now - new Date(firstStartDate)) /
+            (1000 * 60 * 60 * 24)
         )
-        : 1
+      )
+    : 1
 
-    const learningSpeed = Math.round(completedUnits / daysPassed)
+  const learningSpeed = Math.round(completedUnits / daysPassed)
 
-    return (
-        <ScrollView style={styles.container}>
-            <Text style={styles.title}>📈 Progress Overview</Text>
+  return (
+    <ScrollView style={styles.container}>
+      <Text style={styles.title}>Progress Dashboard</Text>
+      <Text style={styles.subtitle}>Your learning performance at a glance</Text>
 
-            <Stat label="Total Targets" value={totalTargets} />
-            <Stat label="Completed Targets" value={completedTargets} />
-            <Stat label="Due Targets" value={dueTargets} />
-            <Stat label="Missed Deadlines" value={missedDeadlines} />
+      {/* Completion Chart */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Overall Completion</Text>
 
-            <View style={styles.divider} />
+        <ProgressChart
+          data={{
+            labels: ["Completed"],
+            data: [completionRate / 100],
+          }}
+          width={screenWidth - 40}
+          height={180}
+          strokeWidth={12}
+          radius={48}
+          chartConfig={{
+            backgroundGradientFrom: "#fff",
+            backgroundGradientTo: "#fff",
+            color: (opacity = 1) =>
+              `rgba(76, 175, 80, ${opacity})`,
+          }}
+          hideLegend
+        />
 
-            <Stat label="Total Units Planned" value={totalUnits} />
-            <Stat label="Units Completed" value={completedUnits} />
-            <Stat label="Completion Rate" value={`${completionRate}%`} />
+        <Text style={styles.bigNumber}>{completionRate}%</Text>
+      </View>
 
-            <View style={styles.divider} />
+      {/* KPI Cards */}
+      <View style={styles.grid}>
+        <KPI label="Total Targets" value={totalTargets} />
+        <KPI label="Completed" value={completedTargets} />
+        <KPI label="Due" value={dueTargets} />
+        <KPI label="Missed" value={missedDeadlines} />
+      </View>
 
-            <Stat
-                label="Learning Speed"
-                value={`${learningSpeed} units/day`}
-            />
+      {/* Units */}
+      <View style={styles.card}>
+        <Stat label="Total Units Planned" value={totalUnits} />
+        <Stat label="Units Completed" value={completedUnits} />
+        <Stat label="Learning Speed" value={`${learningSpeed} units/day`} />
+      </View>
 
-            <View style={styles.divider} />
-
-            <Text style={styles.section}>📚 What I'm Learning</Text>
-            {targets.length === 0 ? (
-                <Text style={styles.muted}>No targets yet.</Text>
-            ) : (
-                targets.map((t) => (
-                    <Text key={t.id} style={styles.item}>
-                        • {t.title} ({t.type})
-                    </Text>
-                ))
-            )}
-        </ScrollView>
-    )
+      {/* Learning List */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>What I’m Learning</Text>
+        {targets.length === 0 ? (
+          <Text style={styles.muted}>No targets yet.</Text>
+        ) : (
+          targets.map((t) => (
+            <Text key={t.id} style={styles.item}>
+              • {t.title} ({t.type})
+            </Text>
+          ))
+        )}
+      </View>
+    </ScrollView>
+  )
 }
 
-// ---- Small stat component ----
-const Stat = ({ label, value }) => (
-    <View style={styles.statRow}>
-        <Text style={styles.label}>{label}</Text>
-        <Text style={styles.value}>{value}</Text>
-    </View>
+/* ---------- Components ---------- */
+
+const KPI = ({ label, value }) => (
+  <View style={styles.kpiCard}>
+    <Text style={styles.kpiValue}>{value}</Text>
+    <Text style={styles.kpiLabel}>{label}</Text>
+  </View>
 )
 
+const Stat = ({ label, value }) => (
+  <View style={styles.statRow}>
+    <Text style={styles.label}>{label}</Text>
+    <Text style={styles.value}>{value}</Text>
+  </View>
+)
+
+/* ---------- Styles ---------- */
+
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        padding: 20,
-        backgroundColor: "#f5f5f5",
-    },
-    title: {
-        fontSize: 26,
-        fontWeight: "bold",
-        marginBottom: 20,
-    },
-    section: {
-        fontSize: 18,
-        fontWeight: "bold",
-        marginBottom: 8,
-    },
-    statRow: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        paddingVertical: 8,
-    },
-    label: {
-        fontSize: 15,
-        color: "#555",
-    },
-    value: {
-        fontSize: 15,
-        fontWeight: "bold",
-    },
-    divider: {
-        height: 1,
-        backgroundColor: "#ddd",
-        marginVertical: 15,
-    },
-    item: {
-        fontSize: 14,
-        marginBottom: 4,
-    },
-    muted: {
-        color: "#999",
-    },
+  container: {
+    flex: 1,
+    padding: 20,
+    backgroundColor: "#f4f6f8",
+  },
+
+  title: {
+    fontSize: 26,
+    fontWeight: "bold",
+    marginBottom: 4,
+  },
+
+  subtitle: {
+    color: "#777",
+    marginBottom: 20,
+  },
+
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    elevation: 3,
+  },
+
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginBottom: 10,
+  },
+
+  bigNumber: {
+    textAlign: "center",
+    fontSize: 28,
+    fontWeight: "bold",
+    marginTop: -10,
+    color: "#4CAF50",
+  },
+
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+
+  kpiCard: {
+    width: "48%",
+    backgroundColor: "#fff",
+    padding: 16,
+    borderRadius: 14,
+    marginBottom: 12,
+    elevation: 2,
+  },
+
+  kpiValue: {
+    fontSize: 22,
+    fontWeight: "bold",
+  },
+
+  kpiLabel: {
+    fontSize: 13,
+    color: "#777",
+    marginTop: 4,
+  },
+
+  statRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 6,
+  },
+
+  label: {
+    fontSize: 14,
+    color: "#555",
+  },
+
+  value: {
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+
+  item: {
+    fontSize: 14,
+    marginBottom: 6,
+  },
+
+  muted: {
+    color: "#999",
+  },
 })
