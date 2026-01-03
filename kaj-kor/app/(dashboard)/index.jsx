@@ -264,18 +264,7 @@ const deleteTask = async (id) => {
                 </TouchableOpacity>
             </View>
 
-<TouchableOpacity
-  onPress={async () => {
-    try {
-      const res = await API.get('/');
-      console.log('✅ Network OK:', res.data);
-    } catch (err) {
-      console.log('❌ Network failed:', err.message);
-    }
-  }}
->
-  <Text>Test API</Text>
-</TouchableOpacity>
+
 
 
         </KeyboardAvoidingView>

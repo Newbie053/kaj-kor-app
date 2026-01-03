@@ -36,11 +36,11 @@ db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 
 // Sync DB
-//sequelize.sync().then(() => console.log('✅ DB synced'));
+sequelize.sync().then(() => console.log('✅ DB synced'));
 // in your main Sequelize sync file
-sequelize.sync({ force: true },
-   console.log('✅ DB synced with force true')
+// sequelize.sync({ force: true },
+//    console.log('✅ DB synced with force true')
 
-); // ⚠️ WARNING: deletes all existing Tasks
+// ); // ⚠️ WARNING: deletes all existing Tasks
 
 module.exports = db;
