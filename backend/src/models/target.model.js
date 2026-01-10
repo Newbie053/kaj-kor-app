@@ -1,3 +1,4 @@
+// backend/src/models/target.model.js
 module.exports = (sequelize, DataTypes) => {
   const Target = sequelize.define('Target', {
     title: { type: DataTypes.STRING, allowNull: false },

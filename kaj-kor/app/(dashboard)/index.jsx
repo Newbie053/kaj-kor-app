@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import axios from 'axios'
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 
 
@@ -19,6 +20,19 @@ import {
 const API = axios.create({
   baseURL: 'http://192.168.10.116:5000/tasks'
 })
+
+API.interceptors.request.use(async (config) => {
+  try {
+    const token = await AsyncStorage.getItem("token"); // get token safely
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  } catch (err) {
+    console.log("[TOKEN ERROR]", err);
+  }
+  return config;
+});
+
 
 
 
@@ -168,13 +182,14 @@ useEffect(() => {
         title: newTaskTitle.trim(),
         deadline: parseTime(newTaskDeadline),
         isCompleted: false
-    }
+    };
   console.log("[DEBUG] Adding task:", newTask)
     try {
         const res = await API.post('/', newTask)
         setTasks([...tasks, res.data])
         setNewTaskTitle('')
         setNewTaskDeadline('')
+        console.log("[DEBUG] Task added successfully")
     } catch (err) { console.log(err)
           console.log("[DEBUG] Add task error:", err.message)
     }

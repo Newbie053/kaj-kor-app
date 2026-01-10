@@ -1,3 +1,4 @@
+// kaj-kor/app/(auth)/login.jsx
 import React, { useState } from "react"
 import {
   View,
@@ -8,6 +9,11 @@ import {
 } from "react-native"
 import axios from "axios"
 import { router } from "expo-router"
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+
+
+
 
 const API = axios.create({
   baseURL: "http://192.168.10.116:5000/auth",
@@ -18,19 +24,22 @@ export default function Login() {
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
 
-  const handleLogin = async () => {
-    try {
-      setError("")
-      const res = await API.post("/login", { email, password })
+const handleLogin = async () => {
+  try {
+    setError("")
+    const res = await API.post("/login", { email, password })
 
-      // TODO (later): save token in SecureStore
-      console.log("LOGIN SUCCESS", res.data)
+    // Save token safely inside async function
+    const token = res.data.token
+    await AsyncStorage.setItem("token", token)
 
-      router.replace("/(dashboard)")
-    } catch (err) {
-      setError("Invalid email or password")
-    }
+    console.log("LOGIN SUCCESS", res.data)
+    router.replace("/(dashboard)")
+  } catch (err) {
+    setError("Invalid email or password")
   }
+}
+
 
   return (
     <View style={styles.container}>

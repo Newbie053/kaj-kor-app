@@ -185,13 +185,11 @@ const remaining = deadlineDate ? getRemainingTime(deadlineDate) : null
 
                 <Text style={styles.percent}>{percent}%</Text>
 
-                {item.deadline && (
-                    <Text style={styles.deadline}>
-                        ⏳ {remaining} (by{" "}
-                       {deadlineDate.toDateString()}
-
-                    </Text>
-                )}
+{item.deadline && (
+    <Text style={styles.deadline}>
+        ⏳ {remaining} (by {deadlineDate.toDateString()})
+    </Text>
+)}
 
                 <TouchableOpacity
                     style={styles.incrementBtn}

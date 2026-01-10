@@ -1,3 +1,4 @@
+// backend/src/controllers/user.controller.js
 const userService = require("../services/user.service");
 
 module.exports = (app) => {

@@ -1,3 +1,4 @@
+// backend/src/models/task.model.js
 module.exports = (sequelize, DataTypes) => {
   const Task = sequelize.define('Task', {
     title: { type: DataTypes.STRING, allowNull: false },

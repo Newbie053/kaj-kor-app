@@ -1,3 +1,4 @@
+// kaj-kor/app/(auth)/signup.jsx
 import React, { useState } from "react"
 import {
   View,

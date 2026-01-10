@@ -1,3 +1,4 @@
+// backend/src/services/user.service.js
 const bcrypt = require("bcryptjs")
 
 const jwt = require("jsonwebtoken")
