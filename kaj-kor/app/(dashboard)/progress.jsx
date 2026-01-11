@@ -9,10 +9,21 @@ import {
 } from "react-native"
 import axios from "axios"
 import { ProgressChart } from "react-native-chart-kit"
+import AsyncStorage from "@react-native-async-storage/async-storage"
+
 
 const API = axios.create({
-  baseURL: "http://192.168.10.116:5000/progress",
+  baseURL: "http://192.168.10.116:5000",
 })
+
+API.interceptors.request.use(async (config) => {
+  const token = await AsyncStorage.getItem("token")
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
 
 const screenWidth = Dimensions.get("window").width
 
@@ -23,7 +34,8 @@ export default function ProgressScreen() {
   React.useEffect(() => {
     const fetchProgress = async () => {
       try {
-        const res = await API.get("/")
+const res = await API.get("/progress")
+
         setTargets(res.data)
       } catch (err) {
         console.log("[PROGRESS FETCH ERROR]", err.message)

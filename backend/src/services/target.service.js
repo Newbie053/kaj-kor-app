@@ -1,14 +1,29 @@
-// backend/src/services/target.service.js
 const { Target } = require('../models');
 
-exports.getAll = async () => await Target.findAll();
+exports.getAll = async (userId) => {
+  return await Target.findAll({
+    where: { userId }
+  });
+};
 
-exports.create = async (data) => await Target.create(data);
+exports.create = async (data, userId) => {
+  return await Target.create({
+    ...data,
+    userId
+  });
+};
 
-exports.increment = async (id) => {
-  const target = await Target.findByPk(id);
-  if (!target) throw new Error('Target not found');
-  if (target.completed < target.total) target.completed += 1;
+exports.increment = async (id, userId) => {
+  const target = await Target.findOne({
+    where: { id, userId }
+  });
+
+  if (!target) throw new Error("Target not found");
+
+  if (target.completed < target.total) {
+    target.completed += 1;
+  }
+
   await target.save();
   return target;
 };

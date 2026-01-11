@@ -1,3 +1,4 @@
+// kaj-kor/app/%28auth%29/_layout.jsx
 import { Stack } from "expo-router";
 import React from "react";
 
@@ -10,7 +11,7 @@ export default function AuthLayout() {
       }}
     >
       {/* Login will be default index */}
-      <Stack.Screen name="index" />
+      <Stack.Screen name="login" />
       <Stack.Screen name="signup" />
     </Stack>
   );
