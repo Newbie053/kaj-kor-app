@@ -35,8 +35,8 @@ export default function ProgressScreen() {
     const fetchProgress = async () => {
       try {
 const res = await API.get("/progress")
+setTargets(res.data.result || [])
 
-        setTargets(res.data)
       } catch (err) {
         console.log("[PROGRESS FETCH ERROR]", err.message)
       }

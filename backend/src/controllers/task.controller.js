@@ -1,58 +1,20 @@
-//kaj-kor/backend/src/controllers/task.controller.js
-const { Task } = require('../models')
-const asyncHandler = require('../utils/asyncHandler')
-const auth = require("../middleware/auth")
+const router = require('express').Router();
+const auth = require('../middleware/auth');
+const taskService = require('../services/task.service');
 
-module.exports = (app) => {
+// GET all tasks
+router.get('/tasks', auth, taskService.getAll);
 
-  // GET all tasks for logged-in user
-  app.get("/tasks", auth, asyncHandler(async (req, res) => {
-    const tasks = await Task.findAll({
-      where: { userId: req.userId }
-    })
-    res.json(tasks)
-  }))
+// CREATE task
+router.post('/tasks', auth, taskService.create);
 
-  // CREATE task for logged-in user
-  app.post("/tasks", auth, asyncHandler(async (req, res) => {
-    const task = await Task.create({
-      ...req.body,
-      userId: req.userId
-    })
-    res.status(201).json(task)
-  }))
+// UPDATE task
+router.put('/tasks/:id', auth, taskService.update);
 
-  // UPDATE task (ownership enforced)
-  app.put("/tasks/:id", auth, asyncHandler(async (req, res) => {
-    const task = await Task.findOne({
-      where: { id: req.params.id, userId: req.userId }
-    })
-    if (!task) return res.status(404).json({ message: "Task not found" })
+// TOGGLE task
+router.patch('/tasks/:id/toggle', auth, taskService.toggle);
 
-    await task.update(req.body)
-    res.json(task)
-  }))
+// DELETE task
+router.delete('/tasks/:id', auth, taskService.remove);
 
-  // TOGGLE task (ownership enforced)
-  app.patch("/tasks/:id/toggle", auth, asyncHandler(async (req, res) => {
-    const task = await Task.findOne({
-      where: { id: req.params.id, userId: req.userId }
-    })
-    if (!task) return res.status(404).json({ message: "Task not found" })
-
-    task.isCompleted = !task.isCompleted
-    await task.save()
-    res.json(task)
-  }))
-
-  // DELETE task (ownership enforced)
-  app.delete("/tasks/:id", auth, asyncHandler(async (req, res) => {
-    const task = await Task.findOne({
-      where: { id: req.params.id, userId: req.userId }
-    })
-    if (!task) return res.status(404).json({ message: "Task not found" })
-
-    await task.destroy()
-    res.status(204).send()
-  }))
-}
+module.exports = router;

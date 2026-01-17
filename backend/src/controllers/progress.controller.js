@@ -1,15 +1,9 @@
 // backend/src/controllers/progress.controller.js
-const progressService = require('../services/progress.service');
-const asyncHandler = require('../utils/asyncHandler');
+const router = require('express').Router();
 const auth = require('../middleware/auth');
+const progressService = require('../services/progress.service');
 
-module.exports = (app) => {
-  app.get(
-    '/progress',
-    auth,
-    asyncHandler(async (req, res) => {
-      const progress = await progressService.getProgress(req.userId);
-      res.json(progress);
-    })
-  );
-};
+// Get user progress
+router.get('/', auth, progressService.getProgress);
+
+module.exports = router;

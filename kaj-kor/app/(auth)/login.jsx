@@ -36,8 +36,10 @@ const handleLogin = async () => {
     console.log("LOGIN SUCCESS", res.data)
     router.replace("/(dashboard)")
   } catch (err) {
-    setError("Invalid email or password")
-  }
+  console.log("LOGIN ERROR:", err.response?.data || err.message)
+  setError(err.response?.data?.message || "Login failed")
+}
+
 }
 
 

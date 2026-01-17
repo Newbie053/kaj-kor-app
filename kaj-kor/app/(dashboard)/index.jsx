@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios'
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 
 
@@ -18,7 +19,8 @@ import {
 } from 'react-native';
 
 const API = axios.create({
-  baseURL: 'http://192.168.10.116:5000/tasks'
+  baseURL: 'http://192.168.10.116:5000'
+
 })
 
 API.interceptors.request.use(async (config) => {
@@ -133,13 +135,16 @@ const DailyTodoScreen = () => {
     // 1. STATE for tasks and new task input
     const [tasks, setTasks] = useState([]);
     const [newTaskTitle, setNewTaskTitle] = useState('');
-    const [newTaskDeadline, setNewTaskDeadline] = useState(''); // Simple text input for deadline
+    const [newTaskDeadline, setNewTaskDeadline] = useState('');
+    const [showTimePicker, setShowTimePicker] = useState(false);
+const [selectedTime, setSelectedTime] = useState(null); // Date object
+ // Simple text input for deadline
 useEffect(() => {
     const fetchTasks = async () => {
       console.log("[DEBUG] Fetching tasks...")
         try {
-            const res = await API.get('/')
-            setTasks(res.data)
+const res = await API.get('/tasks')
+setTasks(res.data.result)
         } catch (err) {
             console.log(err)
             console.log("[DEBUG] Fetch tasks error:", err.message)
@@ -180,14 +185,18 @@ useEffect(() => {
 
     const newTask = {
         title: newTaskTitle.trim(),
-        deadline: parseTime(newTaskDeadline),
+        deadline: selectedTime
+    ? `${selectedTime.getHours().toString().padStart(2,'0')}:${selectedTime.getMinutes().toString().padStart(2,'0')}:00`
+    : null
+,
         isCompleted: false
     };
   console.log("[DEBUG] Adding task:", newTask)
     try {
-        const res = await API.post('/', newTask)
-        setTasks([...tasks, res.data])
+const res = await API.post('/tasks', newTask)
+setTasks(prev => [...prev, res.data.result])
         setNewTaskTitle('')
+        setSelectedTime(null);
         setNewTaskDeadline('')
         console.log("[DEBUG] Task added successfully")
     } catch (err) { console.log(err)
@@ -215,14 +224,19 @@ useEffect(() => {
    const toggleTask = async (id) => {
     const task = tasks.find(t => t.id === id)
     try {
-        const res = await API.put(`/${id}`, { isCompleted: !task.isCompleted })
-        setTasks(tasks.map(t => t.id === id ? res.data : t))
+        const res = await API.patch(`/tasks/${id}/toggle`)
+
+setTasks(prev =>
+  prev.map(t => t.id === id ? res.data.result : t)
+)
+
     } catch (err) { console.log(err) }
 }
 
 const deleteTask = async (id) => {
     try {
-        await API.delete(`/${id}`)
+      await API.delete(`/tasks/${id}`)
+
         setTasks(tasks.filter(t => t.id !== id))
     } catch (err) { console.log(err) }
 }
@@ -267,12 +281,30 @@ const deleteTask = async (id) => {
                     onChangeText={setNewTaskTitle}
                 />
                 {/* Simple Deadline Input (You can upgrade this to a date picker later) */}
-                <TextInput
-                    style={styles.textInput}
-                    placeholder="Optional time (e.g., 8:40 PM)"
-                    value={newTaskDeadline}
-                    onChangeText={setNewTaskDeadline}
-                />
+<TouchableOpacity
+    style={styles.textInput}
+    onPress={() => setShowTimePicker(true)}
+>
+    <Text style={{ color: selectedTime ? '#000' : '#999' }}>
+        {selectedTime
+            ? `${selectedTime.getHours().toString().padStart(2,'0')}:${selectedTime.getMinutes().toString().padStart(2,'0')}`
+            : "Optional time (e.g., 8:40 PM)"}
+    </Text>
+</TouchableOpacity>
+
+{showTimePicker && (
+    <DateTimePicker
+        value={selectedTime || new Date()}
+        mode="time"
+        is24Hour={false} // false → 12-hour format with AM/PM
+        display={Platform.OS === "ios" ? "spinner" : "default"} // digital on iOS, native on Android
+        onChange={(event, date) => {
+            setShowTimePicker(false);
+            if (date) setSelectedTime(date);
+        }}
+    />
+)}
+
 
                 <TouchableOpacity style={styles.addButton} onPress={addTask}>
                     <Text style={styles.addButtonText}>Add Task</Text>

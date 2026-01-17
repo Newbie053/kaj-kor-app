@@ -32,8 +32,9 @@ const TargetScreen = () => {
     React.useEffect(() => {
   const fetchTargets = async () => {
     try {
-      const res = await API.get("/")
-      setTargets(res.data)
+const res = await API.get("/")
+setTargets(res.data.result || [])
+
     } catch (err) {
       console.log("[TARGET FETCH ERROR]", err.message)
     }
@@ -126,8 +127,31 @@ const TargetScreen = () => {
   }
 
   try {
-    const res = await API.post("/", payload)
-    setTargets((prev) => [...prev, res.data])
+// Create a temporary ID for frontend before backend response
+const tempId = Date.now().toString() + Math.random().toString(36).substr(2, 5)
+
+const tempTarget = {
+  ...payload,
+  id: tempId,       // temp ID
+}
+
+// Optimistically add target to state
+setTargets((prev) => [...prev, tempTarget])
+
+try {
+  const res = await API.post("/", payload)
+  const savedTarget = res.data.result
+
+  // Replace tempTarget with saved target from backend
+  setTargets((prev) =>
+    prev.map((t) => (t.id === tempId ? savedTarget : t))
+  )
+} catch (err) {
+  console.log("[ADD TARGET ERROR]", err.message)
+  // Remove tempTarget if backend fails
+  setTargets((prev) => prev.filter((t) => t.id !== tempId))
+}
+
 
     setTitle("")
     setTotalUnits("")
@@ -150,16 +174,25 @@ const TargetScreen = () => {
 
     // ---- RENDER ----
 
-    const incrementProgress = async (id) => {
+const incrementProgress = async (id) => {
+  // Skip if temp ID (not numeric)
+  if (isNaN(Number(id))) {
+    console.log("[INCREMENT SKIPPED] temp target, wait for backend")
+    return
+  }
+
   try {
     const res = await API.patch(`/${id}/increment`)
+    const updatedTarget = res.data.result  // always pick `result` from backend
+
     setTargets((prev) =>
-      prev.map((t) => (t.id === id ? res.data : t))
+      prev.map((t) => (t.id === id ? updatedTarget : t))
     )
   } catch (err) {
     console.log("[INCREMENT ERROR]", err.message)
   }
 }
+
 
     const renderItem = ({ item }) => {
         const percent = Math.round((item.completed / item.total) * 100)
@@ -304,7 +337,8 @@ const remaining = deadlineDate ? getRemainingTime(deadlineDate) : null
             {/* Target List */}
             <FlatList
                 data={targets}
-                keyExtractor={(item) => item.id}
+keyExtractor={(item) => item.id.toString()}
+
                 renderItem={renderItem}
                 ListEmptyComponent={
                     <Text style={styles.empty}>
