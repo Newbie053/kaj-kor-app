@@ -7,8 +7,23 @@ module.exports = (sequelize, DataTypes) => {
   });
 
   User.associate = (models) => {
-    User.hasMany(models.Task, { foreignKey: 'userId' });
+    // Personal daily tasks (manual)
+    User.hasMany(models.DailyTask, { foreignKey: 'userId' });
+
+    // Long-term goals
     User.hasMany(models.Target, { foreignKey: 'userId' });
+
+    // Progress logs
+    User.hasMany(models.Checkin, { foreignKey: 'userId' });
+
+    // Notifications
+    User.hasMany(models.Notification, { foreignKey: 'userId' });
+
+    // Devices for push notifications
+    User.hasMany(models.UserDevice, { foreignKey: 'userId' });
+
+    // 1:1 settings
+    User.hasOne(models.UserNotificationSetting, { foreignKey: 'userId' });
   };
 
   return User;
