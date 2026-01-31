@@ -1,26 +1,28 @@
-import { Tabs } from "expo-router"
-import { useColorScheme, View, TouchableOpacity, Text, Alert } from "react-native"
+import { Tabs, usePathname } from "expo-router"
+import { useColorScheme, View, TouchableOpacity } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { Colors } from "../constants/Colors"
 import { useRouter } from "expo-router"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 
-
 export default function DashboardLayout() {
     const colorScheme = useColorScheme()
     const theme = Colors[colorScheme] ?? Colors.light
     const router = useRouter()
+    const pathname = usePathname() // Get current path
+
+    // Check if we're on day-planner page
+    const isDayPlanner = pathname.includes("day-planner")
 
     // Logout handler
-const handleLogout = async () => {
-  try {
-    await AsyncStorage.removeItem("token")
-    router.replace("/(auth)/login") // safe redirect
-  } catch (err) {
-    console.log("Logout error:", err)
-  }
-}
-
+    const handleLogout = async () => {
+        try {
+            await AsyncStorage.removeItem("token")
+            router.replace("/(auth)/login")
+        } catch (err) {
+            console.log("Logout error:", err)
+        }
+    }
 
     // Header component
     const Header = () => (
@@ -45,11 +47,12 @@ const handleLogout = async () => {
             <Header />
             <Tabs
                 screenOptions={{
-                    headerShown: false, // hide individual headers
+                    headerShown: false,
                     tabBarStyle: {
                         backgroundColor: theme.navBackground,
                         height: 90,
                         paddingTop: 10,
+                        display: isDayPlanner ? "none" : "flex", // Hide on day-planner
                     },
                     tabBarActiveTintColor: theme.iconColorFocused,
                     tabBarInactiveTintColor: theme.iconColor,
@@ -86,6 +89,13 @@ const handleLogout = async () => {
                         tabBarIcon: ({ color, size }) => (
                             <Ionicons name="stats-chart-outline" size={size} color={color} />
                         ),
+                    }}
+                />
+
+                <Tabs.Screen
+                    name="day-planner"
+                    options={{
+                        href: null, // Hide from tab bar
                     }}
                 />
             </Tabs>
