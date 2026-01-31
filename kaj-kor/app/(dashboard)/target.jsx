@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useRouter } from "expo-router"; // Add this import
+import { useRouter } from "expo-router";
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+    Alert // <-- ADD THIS IMPORT
 } from "react-native";
 
 const API = axios.create({
@@ -29,8 +30,10 @@ API.interceptors.request.use(async (config) => {
 });
 
 const TargetScreen = () => {
-   const router = useRouter(); // Add this line here
+  const router = useRouter();
   const [targets, setTargets] = useState([]);
+  const [filteredTargets, setFilteredTargets] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const [addSkillModalVisible, setAddSkillModalVisible] = useState(false);
   const [activeTarget, setActiveTarget] = useState(null);
   const [dayPlannerModalVisible, setDayPlannerModalVisible] = useState(false);
@@ -39,92 +42,113 @@ const TargetScreen = () => {
   const [dayTaskInput, setDayTaskInput] = useState("");
   const [dayNotesInput, setDayNotesInput] = useState("");
 
-  // New target form
+  // New target form with custom options
   const [skillName, setSkillName] = useState("");
-  const [totalDays, setTotalDays] = useState("30");
-  const [dailyMinutes, setDailyMinutes] = useState("30");
+  const [selectedDaysOption, setSelectedDaysOption] = useState("30");
+  const [customDays, setCustomDays] = useState("");
+  const [selectedMinutesOption, setSelectedMinutesOption] = useState("30");
+  const [customMinutes, setCustomMinutes] = useState("");
+  const [showStartNextModal, setShowStartNextModal] = useState(false);
+const [targetForNextDay, setTargetForNextDay] = useState(null);
+
+  // Days options including custom
+  const daysOptions = [
+
+    { value: "15", label: "15 days" },
+
+    { value: "30", label: "30 days" },
+    { value: "60", label: "60 days" },
+    { value: "90", label: "90 days" },
+    { value: "custom", label: "Custom" }
+  ];
+
+  // Daily time options including custom
+  const minutesOptions = [
+
+    { value: "30", label: "30 min" },
+    { value: "45", label: "45 min" },
+    { value: "60", label: "1 hour" },
+
+    { value: "120", label: "2 hours" },
+    { value: "custom", label: "Custom" }
+  ];
 
   useEffect(() => {
     fetchTargets();
   }, []);
 
+  useEffect(() => {
+    if (searchQuery.trim() === "") {
+      setFilteredTargets(targets);
+    } else {
+      const query = searchQuery.toLowerCase().trim();
+      const filtered = targets.filter(target => {
+        const targetSkillName = target.skillName?.toLowerCase() || "";
+        const targetTitle = target.title?.toLowerCase() || "";
+        return targetSkillName.includes(query) || targetTitle.includes(query);
+      });
+      setFilteredTargets(filtered);
+    }
+  }, [searchQuery, targets]);
+
   // Helper function to ensure dayPlans always exists
-// Helper function to ensure dayPlans always exists
-const ensureDayPlans = (target) => {
-  console.log("ensureDayPlans called for target:", target.id, target.skillName);
-  console.log("Existing dayPlans:", target.dayPlans);
+  const ensureDayPlans = (target) => {
+    const days = target.totalDays || 30;
 
-  const days = target.totalDays || 30;
+    if (!target.dayPlans) {
+      return Array.from({ length: days }, (_, i) => ({
+        day: i + 1,
+        task: "",
+        notes: "",
+        completed: false
+      }));
+    }
 
-  // If dayPlans is null or undefined
-  if (!target.dayPlans) {
-    console.log("dayPlans is null/undefined, creating new array");
-    return Array.from({ length: days }, (_, i) => ({
-      day: i + 1,
-      task: "",
-      notes: "",
-      completed: false
-    }));
-  }
-
-  // If dayPlans exists but is not an array (maybe it's an object or string)
-  if (!Array.isArray(target.dayPlans)) {
-    console.log("dayPlans is not an array, type:", typeof target.dayPlans);
-    // Try to parse it if it's a string
-    if (typeof target.dayPlans === 'string') {
-      try {
-        const parsed = JSON.parse(target.dayPlans);
-        if (Array.isArray(parsed)) {
-          return parsed;
+    if (!Array.isArray(target.dayPlans)) {
+      if (typeof target.dayPlans === 'string') {
+        try {
+          const parsed = JSON.parse(target.dayPlans);
+          if (Array.isArray(parsed)) {
+            return parsed;
+          }
+        } catch (e) {
+          console.log("Failed to parse dayPlans string:", e);
         }
-      } catch (e) {
-        console.log("Failed to parse dayPlans string:", e);
+      }
+      return Array.from({ length: days }, (_, i) => ({
+        day: i + 1,
+        task: "",
+        notes: "",
+        completed: false
+      }));
+    }
+
+    if (target.dayPlans.length !== days) {
+      if (target.dayPlans.length < days) {
+        const newDayPlans = [...target.dayPlans];
+        for (let i = target.dayPlans.length; i < days; i++) {
+          newDayPlans.push({
+            day: i + 1,
+            task: "",
+            notes: "",
+            completed: false
+          });
+        }
+        return newDayPlans;
+      } else if (target.dayPlans.length > days) {
+        return target.dayPlans.slice(0, days);
       }
     }
-    // If still not an array, create new one
-    return Array.from({ length: days }, (_, i) => ({
-      day: i + 1,
-      task: "",
-      notes: "",
-      completed: false
+
+    const validatedDayPlans = target.dayPlans.map((plan, index) => ({
+      day: index + 1,
+      task: plan?.task || "",
+      notes: plan?.notes || "",
+      completed: plan?.completed || false
     }));
-  }
 
-  // Now we have an array, ensure it has the right length
-  console.log("dayPlans is array, length:", target.dayPlans.length);
-
-  // If array has wrong number of days, fix it
-  if (target.dayPlans.length !== days) {
-    console.log(`Fixing array length: ${target.dayPlans.length} -> ${days}`);
-
-    if (target.dayPlans.length < days) {
-      // Add missing days
-      const newDayPlans = [...target.dayPlans];
-      for (let i = target.dayPlans.length; i < days; i++) {
-        newDayPlans.push({
-          day: i + 1,
-          task: "",
-          notes: "",
-          completed: false
-        });
-      }
-      return newDayPlans;
-    } else if (target.dayPlans.length > days) {
-      // Remove extra days
-      return target.dayPlans.slice(0, days);
-    }
-  }
-
-  // Ensure each day has the right structure
-  const validatedDayPlans = target.dayPlans.map((plan, index) => ({
-    day: index + 1,
-    task: plan?.task || "",
-    notes: plan?.notes || "",
-    completed: plan?.completed || false
-  }));
-
-  return validatedDayPlans;
-};
+    return validatedDayPlans;
+  };
 
   const fetchTargets = async () => {
     try {
@@ -134,6 +158,7 @@ const ensureDayPlans = (target) => {
         dayPlans: ensureDayPlans(target)
       }));
       setTargets(targetsWithPlans);
+      setFilteredTargets(targetsWithPlans);
     } catch (err) {
       console.log("[TARGET FETCH ERROR]", err.message);
     }
@@ -146,17 +171,43 @@ const ensureDayPlans = (target) => {
       return;
     }
 
+    // Calculate total days
+    let totalDaysValue;
+    if (selectedDaysOption === "custom") {
+      const customDaysNum = parseInt(customDays);
+      if (!customDays || isNaN(customDaysNum) || customDaysNum <= 0) {
+        alert("Please enter a valid number of days");
+        return;
+      }
+      totalDaysValue = customDaysNum;
+    } else {
+      totalDaysValue = parseInt(selectedDaysOption);
+    }
+
+    // Calculate daily minutes
+    let dailyMinutesValue;
+    if (selectedMinutesOption === "custom") {
+      const customMinutesNum = parseInt(customMinutes);
+      if (!customMinutes || isNaN(customMinutesNum) || customMinutesNum <= 0) {
+        alert("Please enter a valid number of minutes");
+        return;
+      }
+      dailyMinutesValue = customMinutesNum;
+    } else {
+      dailyMinutesValue = parseInt(selectedMinutesOption);
+    }
+
     const newTarget = {
       title: `Learn ${skillName}`,
-      description: `Learning ${skillName} for ${totalDays} days`,
+      description: `Learning ${skillName} for ${totalDaysValue} days`,
       skillName: skillName.trim(),
-      totalDays: parseInt(totalDays),
-      dailyMinutes: parseInt(dailyMinutes),
-      total: parseInt(totalDays),
+      totalDays: totalDaysValue,
+      dailyMinutes: dailyMinutesValue,
+      total: totalDaysValue,
       completed: 0,
       currentDay: 1,
       type: "Skill",
-      dayPlans: Array.from({ length: parseInt(totalDays) }, (_, i) => ({
+      dayPlans: Array.from({ length: totalDaysValue }, (_, i) => ({
         day: i + 1,
         task: "",
         notes: "",
@@ -165,12 +216,9 @@ const ensureDayPlans = (target) => {
     };
 
     try {
-      console.log("Creating target:", newTarget);
       const res = await API.post("/targets", newTarget);
       const createdTarget = res.data.result;
-      console.log("Created target response:", createdTarget);
 
-      // Ensure dayPlans exists in the response
       if (!createdTarget.dayPlans) {
         createdTarget.dayPlans = Array.from({ length: createdTarget.totalDays }, (_, i) => ({
           day: i + 1,
@@ -186,13 +234,17 @@ const ensureDayPlans = (target) => {
       };
 
       setTargets([...targets, normalizedTarget]);
+      setFilteredTargets([...targets, normalizedTarget]);
+
+      // Reset form
       setSkillName("");
-      setTotalDays("30");
-      setDailyMinutes("30");
+      setSelectedDaysOption("30");
+      setCustomDays("");
+      setSelectedMinutesOption("30");
+      setCustomMinutes("");
       setAddSkillModalVisible(false);
 
-      // Open day planner immediately after creating target
-router.push(`/day-planner?targetId=${createdTarget.id}`);
+      router.push(`/day-planner?targetId=${createdTarget.id}`);
     } catch (err) {
       console.log("[CREATE TARGET ERROR]", err.message);
       alert("Error creating skill: " + err.message);
@@ -200,66 +252,59 @@ router.push(`/day-planner?targetId=${createdTarget.id}`);
   };
 
   // ========== UPDATE DAY PLAN ==========
-// ========== UPDATE DAY PLAN ==========
-const updateDayPlan = async (targetId, dayIndex, task, notes) => {
-  try {
-    const target = targets.find(t => t.id === targetId);
-    if (!target) return;
+  const updateDayPlan = async (targetId, dayIndex, task, notes) => {
+    try {
+      const target = targets.find(t => t.id === targetId);
+      if (!target) return;
 
-    const currentDayPlans = ensureDayPlans(target);
-    const updatedDayPlans = [...currentDayPlans];
+      const currentDayPlans = ensureDayPlans(target);
+      const updatedDayPlans = [...currentDayPlans];
 
-    // Update the specific day
-    updatedDayPlans[dayIndex] = {
-      ...updatedDayPlans[dayIndex],
-      day: dayIndex + 1,
-      task: task || "",
-      notes: notes || "",
-      completed: updatedDayPlans[dayIndex]?.completed || false
-    };
+      updatedDayPlans[dayIndex] = {
+        ...updatedDayPlans[dayIndex],
+        day: dayIndex + 1,
+        task: task || "",
+        notes: notes || "",
+        completed: updatedDayPlans[dayIndex]?.completed || false
+      };
 
-    console.log("Updating day plan:", {
-      targetId,
-      dayIndex,
-      task,
-      notes,
-      updatedDayPlans
-    });
+      const res = await API.patch(`/targets/${targetId}`, {
+        dayPlans: updatedDayPlans
+      });
 
-    const res = await API.patch(`/targets/${targetId}`, {
-      dayPlans: updatedDayPlans
-    });
+      const updatedTargets = targets.map(t =>
+        t.id === targetId ? { ...res.data.result, dayPlans: updatedDayPlans } : t
+      );
+      setTargets(updatedTargets);
 
-    // Update local state
-    const updatedTargets = targets.map(t =>
-      t.id === targetId ? { ...res.data.result, dayPlans: updatedDayPlans } : t
-    );
-    setTargets(updatedTargets);
+      const updatedFilteredTargets = filteredTargets.map(t =>
+        t.id === targetId ? { ...res.data.result, dayPlans: updatedDayPlans } : t
+      );
+      setFilteredTargets(updatedFilteredTargets);
 
-    // Update selected target if it's the same
-    if (selectedTargetForPlanner?.id === targetId) {
-      const updatedTarget = updatedTargets.find(t => t.id === targetId);
-      setSelectedTargetForPlanner(updatedTarget);
+      if (selectedTargetForPlanner?.id === targetId) {
+        const updatedTarget = updatedTargets.find(t => t.id === targetId);
+        setSelectedTargetForPlanner(updatedTarget);
+      }
+
+      if (activeTarget?.id === targetId) {
+        const updatedActiveTarget = updatedTargets.find(t => t.id === targetId);
+        setActiveTarget(updatedActiveTarget);
+      }
+
+      setEditingDayIndex(null);
+      setDayTaskInput("");
+      setDayNotesInput("");
+
+      alert("Day plan saved!");
+    } catch (err) {
+      console.log("[UPDATE DAY PLAN ERROR]", err.message, err.response?.data);
+      alert("Error saving plan: " + err.message);
     }
-
-    // Also update activeTarget if it's the same target
-    if (activeTarget?.id === targetId) {
-      const updatedActiveTarget = updatedTargets.find(t => t.id === targetId);
-      setActiveTarget(updatedActiveTarget);
-    }
-
-    setEditingDayIndex(null);
-    setDayTaskInput("");
-    setDayNotesInput("");
-
-    alert("Day plan saved!");
-  } catch (err) {
-    console.log("[UPDATE DAY PLAN ERROR]", err.message, err.response?.data);
-    alert("Error saving plan: " + err.message);
-  }
-};
+  };
 
   // ========== MARK DAY COMPLETE ==========
+// ========== MARK DAY COMPLETE ==========
 const markDayComplete = async (targetId, notes = "") => {
   try {
     const res = await API.patch(`/targets/${targetId}/complete-day`, {
@@ -267,107 +312,119 @@ const markDayComplete = async (targetId, notes = "") => {
       timeSpent: 30,
     });
 
-    // Update target with normalized dayPlans
     const updatedTarget = {
       ...res.data.result,
       dayPlans: ensureDayPlans(res.data.result)
     };
 
-    // Update targets array
     const updatedTargets = targets.map(t =>
       t.id === targetId ? updatedTarget : t
     );
     setTargets(updatedTargets);
 
-    // Also update activeTarget if it's the same
+    const updatedFilteredTargets = filteredTargets.map(t =>
+      t.id === targetId ? updatedTarget : t
+    );
+    setFilteredTargets(updatedFilteredTargets);
+
     if (activeTarget?.id === targetId) {
       setActiveTarget(updatedTarget);
     }
 
-    setActiveTarget(null);
+    // Show option to start next day
+    Alert.alert(
+      "🎉 Great Job!",
+      "Today's skill practice completed! Would you like to start tomorrow's task now?",
+      [
+        {
+          text: "Not Now",
+          onPress: () => {
+            setActiveTarget(null);
+            alert("Task completed! You can start tomorrow's task anytime from the schedule.");
+          }
+        },
+        {
+          text: "Start Tomorrow",
+          onPress: () => {
+            setTargetForNextDay(updatedTarget);
+            setShowStartNextModal(true);
+          }
+        }
+      ]
+    );
+
   } catch (err) {
     console.log("[COMPLETE DAY ERROR]", err.message);
+    alert("Error completing task: " + err.message);
   }
 };
-
-const skipDay = async (targetId) => {
+// ========== START NEXT DAY ==========
+const startNextDay = async (targetId) => {
   try {
-    const res = await API.patch(`/targets/${targetId}/skip-day`);
+    const res = await API.patch(`/targets/${targetId}/start-next`);
 
-    // Update target with normalized dayPlans
     const updatedTarget = {
       ...res.data.result,
       dayPlans: ensureDayPlans(res.data.result)
     };
 
-    // Update targets array
     const updatedTargets = targets.map(t =>
       t.id === targetId ? updatedTarget : t
     );
     setTargets(updatedTargets);
 
-    // Also update activeTarget if it's the same
+    const updatedFilteredTargets = filteredTargets.map(t =>
+      t.id === targetId ? updatedTarget : t
+    );
+    setFilteredTargets(updatedFilteredTargets);
+
     if (activeTarget?.id === targetId) {
       setActiveTarget(updatedTarget);
     }
 
-    setActiveTarget(null);
+    setShowStartNextModal(false);
+    setTargetForNextDay(null);
+
+    alert("Tomorrow's task is now available! You can find it in your schedule.");
   } catch (err) {
-    console.log("[SKIP DAY ERROR]", err.message);
+    console.log("[START NEXT DAY ERROR]", err.message);
+    alert(err.response?.data?.message || "Error starting next day");
   }
 };
 
+  const skipDay = async (targetId) => {
+    try {
+      const res = await API.patch(`/targets/${targetId}/skip-day`);
 
-  // ========== FIX DAY PLANS (Debug helper) ==========
-// ========== FIX DAY PLANS (Debug helper) ==========
-const fixDayPlans = async (targetId) => {
-  try {
-    const target = targets.find(t => t.id === targetId);
-    if (!target) return;
+      const updatedTarget = {
+        ...res.data.result,
+        dayPlans: ensureDayPlans(res.data.result)
+      };
 
-    const days = target.totalDays || 30;
-    const dayPlans = Array.from({ length: days }, (_, i) => ({
-      day: i + 1,
-      task: "",
-      notes: "",
-      completed: false
-    }));
+      const updatedTargets = targets.map(t =>
+        t.id === targetId ? updatedTarget : t
+      );
+      setTargets(updatedTargets);
 
-    console.log("Fixing dayPlans for target:", targetId, "with", days, "days");
+      const updatedFilteredTargets = filteredTargets.map(t =>
+        t.id === targetId ? updatedTarget : t
+      );
+      setFilteredTargets(updatedFilteredTargets);
 
-    const res = await API.patch(`/targets/${targetId}`, {
-      dayPlans: dayPlans
-    });
+      if (activeTarget?.id === targetId) {
+        setActiveTarget(updatedTarget);
+      }
 
-    // Update local state
-    const updatedTarget = { ...res.data.result, dayPlans: dayPlans };
-    const updatedTargets = targets.map(t => t.id === targetId ? updatedTarget : t);
-    setTargets(updatedTargets);
-
-    if (selectedTargetForPlanner?.id === targetId) {
-      setSelectedTargetForPlanner(updatedTarget);
-      // Refresh the planner
-      setDayPlannerModalVisible(false);
-      setTimeout(() => {
-        setSelectedTargetForPlanner(updatedTarget);
-        setDayPlannerModalVisible(true);
-      }, 100);
+      setActiveTarget(null);
+    } catch (err) {
+      console.log("[SKIP DAY ERROR]", err.message);
     }
-
-    alert(`Reset ${days} day plans!`);
-  } catch (err) {
-    console.log("Fix day plans error:", err);
-    alert("Error fixing plans: " + err.message);
-  }
-};
+  };
 
   // ========== RENDER TARGET CARD ==========
   const renderTarget = ({ item }) => {
     const progressPercent = Math.round(((item.currentDay || 1) - 1) / item.totalDays * 100);
-    const daysLeft = item.totalDays - ((item.currentDay || 1) - 1);
     const completedDays = (item.dailyLogs || []).filter(log => log.completed).length;
-
-    // Count how many days have plans
     const dayPlans = ensureDayPlans(item);
     const plannedDays = dayPlans.filter(plan => plan?.task?.trim()).length;
 
@@ -407,34 +464,24 @@ const fixDayPlans = async (targetId) => {
         </View>
 
         <View style={styles.cardButtons}>
-          {/* Debug button - remove this in production */}
-          {/* <TouchableOpacity
-            style={[styles.cardButton, { backgroundColor: 'orange' }]}
-            onPress={() => fixDayPlans(item.id)}
-          >
-            <Text style={{ color: 'white', fontSize: 12 }}>Fix Plans</Text>
-          </TouchableOpacity> */}
-
           <TouchableOpacity
             style={[styles.cardButton, styles.detailsButton]}
-onPress={() => {
-  router.push(`/day-planner?targetId=${item.id}`);
-}}
+            onPress={() => {
+              router.push(`/day-planner?targetId=${item.id}`);
+            }}
           >
             <Text style={styles.detailsButtonText}>📋 Plan Days</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.cardButton, styles.todayButton]}
-            // In renderTarget function, update the Today button:
-onPress={() => {
-  // Make sure we have the latest data by ensuring dayPlans
-  const refreshedTarget = {
-    ...item,
-    dayPlans: ensureDayPlans(item)
-  };
-  setActiveTarget(refreshedTarget);
-}}
+            onPress={() => {
+              const refreshedTarget = {
+                ...item,
+                dayPlans: ensureDayPlans(item)
+              };
+              setActiveTarget(refreshedTarget);
+            }}
           >
             <Text style={styles.todayButtonText}>✅ Today</Text>
           </TouchableOpacity>
@@ -444,121 +491,119 @@ onPress={() => {
   };
 
   // ========== DAY CHECK-IN MODAL ==========
-// ========== DAY CHECK-IN MODAL ==========
-const DayCheckInModal = () => {
-  if (!activeTarget) return null;
+  const DayCheckInModal = () => {
+    if (!activeTarget) return null;
 
-  // Always ensure dayPlans exists for the active target
-  const dayPlans = ensureDayPlans(activeTarget);
-  const todayPlan = dayPlans[(activeTarget.currentDay || 1) - 1];
+    const dayPlans = ensureDayPlans(activeTarget);
+    const todayPlan = dayPlans[(activeTarget.currentDay || 1) - 1];
 
-  // Add debug logging to see what's happening
-  console.log("DayCheckInModal - activeTarget:", activeTarget.id, activeTarget.skillName);
-  console.log("DayCheckInModal - currentDay:", activeTarget.currentDay || 1);
-  console.log("DayCheckInModal - dayPlans length:", dayPlans.length);
-  console.log("DayCheckInModal - todayPlan:", todayPlan);
-
-  return (
-    <Modal
-      animationType="slide"
-      transparent={true}
-      visible={!!activeTarget}
-      onRequestClose={() => setActiveTarget(null)}
-    >
-      <View style={styles.modalOverlay}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={styles.modalContent}
-        >
-          <Text style={styles.modalTitle}>
-            📅 Day {activeTarget.currentDay || 1} of {activeTarget.totalDays}
-          </Text>
-          <Text style={styles.modalSubtitle}>
-            {activeTarget.skillName || activeTarget.title}
-          </Text>
-
-          {/* Show today's planned task if exists */}
-          {todayPlan?.task && todayPlan.task.trim() ? (
-            <View style={styles.todayTaskContainer}>
-              <Text style={styles.todayTaskLabel}>Today's Plan:</Text>
-              <Text style={styles.todayTaskText}>
-                {todayPlan.task}
-              </Text>
-              {todayPlan?.notes && todayPlan.notes.trim() && (
-                <Text style={styles.todayTaskNotes}>
-                  {todayPlan.notes}
-                </Text>
-              )}
-            </View>
-          ) : (
-            <View style={[styles.todayTaskContainer, {backgroundColor: '#f8f9fa'}]}>
-              <Text style={[styles.todayTaskLabel, {color: '#6c757d'}]}>
-                No plan set for today
-              </Text>
-              <Text style={[styles.todayTaskText, {color: '#6c757d', fontStyle: 'italic'}]}>
-                You haven't set a plan for Day {activeTarget.currentDay || 1}
-              </Text>
-            </View>
-          )}
-
-          <TextInput
-            style={styles.notesInput}
-            placeholder="What did you learn today? (optional)"
-            multiline
-            numberOfLines={3}
-          />
-
-          <View style={styles.modalButtons}>
-            <TouchableOpacity
-              style={[styles.modalButton, styles.skipButton]}
-              onPress={() => skipDay(activeTarget.id)}
-            >
-              <Text style={styles.skipButtonText}>Skip Today</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.modalButton, styles.completeButton]}
-              onPress={() => markDayComplete(activeTarget.id, "Learned something new!")}
-            >
-              <Text style={styles.completeButtonText}>✓ Complete</Text>
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity
-            style={styles.closeButton}
-            onPress={() => setActiveTarget(null)}
+    return (
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={!!activeTarget}
+        onRequestClose={() => setActiveTarget(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={styles.modalContent}
           >
-            <Text style={styles.closeButtonText}>Close</Text>
-          </TouchableOpacity>
-        </KeyboardAvoidingView>
-      </View>
-    </Modal>
-  );
-};
+            <Text style={styles.modalTitle}>
+              📅 Day {activeTarget.currentDay || 1} of {activeTarget.totalDays}
+            </Text>
+            <Text style={styles.modalSubtitle}>
+              {activeTarget.skillName || activeTarget.title}
+            </Text>
+
+            {todayPlan?.task && todayPlan.task.trim() ? (
+              <View style={styles.todayTaskContainer}>
+                <Text style={styles.todayTaskLabel}>Today's Plan:</Text>
+                <Text style={styles.todayTaskText}>
+                  {todayPlan.task}
+                </Text>
+                {todayPlan?.notes && todayPlan.notes.trim() && (
+                  <Text style={styles.todayTaskNotes}>
+                    {todayPlan.notes}
+                  </Text>
+                )}
+              </View>
+            ) : (
+              <View style={[styles.todayTaskContainer, {backgroundColor: '#f8f9fa'}]}>
+                <Text style={[styles.todayTaskLabel, {color: '#6c757d'}]}>
+                  No plan set for today
+                </Text>
+                <Text style={[styles.todayTaskText, {color: '#6c757d', fontStyle: 'italic'}]}>
+                  You haven't set a plan for Day {activeTarget.currentDay || 1}
+                </Text>
+              </View>
+            )}
+
+            <TextInput
+              style={styles.notesInput}
+              placeholder="What did you learn today? (optional)"
+              multiline
+              numberOfLines={3}
+            />
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.skipButton]}
+                onPress={() => skipDay(activeTarget.id)}
+              >
+                <Text style={styles.skipButtonText}>Skip Today</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, styles.completeButton]}
+                onPress={() => markDayComplete(activeTarget.id, "Learned something new!")}
+              >
+                <Text style={styles.completeButtonText}>✓ Complete</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => setActiveTarget(null)}
+            >
+              <Text style={styles.closeButtonText}>Close</Text>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+    );
+  };
 
   // ========== DAY PLANNER MODAL ==========
-// ========== DAY PLANNER MODAL ==========
-const DayPlannerModal = () => {
-  if (!selectedTargetForPlanner) {
-    console.log("No target selected for planner");
-    return null;
-  }
+  const DayPlannerModal = () => {
+    if (!selectedTargetForPlanner) return null;
 
-  console.log("Rendering DayPlannerModal for target:", selectedTargetForPlanner);
-  console.log("Target totalDays:", selectedTargetForPlanner.totalDays);
-  console.log("Day plans length:", selectedTargetForPlanner.dayPlans?.length);
-  console.log("Day plans data:", selectedTargetForPlanner.dayPlans);
+    const target = selectedTargetForPlanner;
+    const totalDays = target.totalDays || 30;
+    const dayPlans = ensureDayPlans(target);
 
-  const target = selectedTargetForPlanner;
-  const totalDays = target.totalDays || 30;
-  const dayPlans = ensureDayPlans(target); // Use helper function
+    if (!Array.isArray(dayPlans)) {
+      return (
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={dayPlannerModalVisible}
+          onRequestClose={() => {
+            setDayPlannerModalVisible(false);
+            setSelectedTargetForPlanner(null);
+            setEditingDayIndex(null);
+          }}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, styles.dayPlannerModal]}>
+              <Text style={{color: 'red'}}>Error: dayPlans is not an array</Text>
+              <Text>{JSON.stringify(dayPlans)}</Text>
+            </View>
+          </View>
+        </Modal>
+      );
+    }
 
-  console.log("After ensureDayPlans - length:", dayPlans.length);
-  console.log("First 5 day plans:", dayPlans.slice(0, 5));
-
-  // Check if we have an array to map over
-  if (!Array.isArray(dayPlans)) {
-    console.error("dayPlans is not an array:", dayPlans);
     return (
       <Modal
         animationType="slide"
@@ -571,210 +616,241 @@ const DayPlannerModal = () => {
         }}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, styles.dayPlannerModal]}>
-            <Text style={{color: 'red'}}>Error: dayPlans is not an array</Text>
-            <Text>{JSON.stringify(dayPlans)}</Text>
-          </View>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={[styles.modalContent, styles.dayPlannerModal]}
+          >
+            <View style={styles.plannerHeader}>
+              <View>
+                <Text style={styles.plannerTitle}>📝 {target.skillName || target.title}</Text>
+                <Text style={styles.plannerSubtitle}>
+                  Plan your {totalDays}-day learning journey
+                </Text>
+                <Text style={{fontSize: 12, color: '#666', marginTop: 4}}>
+                  Showing {dayPlans.length} days
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.closePlannerButton}
+                onPress={() => {
+                  setDayPlannerModalVisible(false);
+                  setSelectedTargetForPlanner(null);
+                  setEditingDayIndex(null);
+                }}
+              >
+                <Text style={styles.closePlannerButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.dayListHeader}>
+              <Text style={styles.dayListTitle}>Day-by-Day Plan</Text>
+              <TouchableOpacity
+                style={styles.skipPlanningButton}
+                onPress={() => {
+                  setDayPlannerModalVisible(false);
+                  setSelectedTargetForPlanner(null);
+                  setEditingDayIndex(null);
+                }}
+              >
+                <Text style={styles.skipPlanningText}>Skip for now</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.dayListContainer}
+              showsVerticalScrollIndicator={true}
+              contentContainerStyle={{ paddingBottom: 20 }}
+            >
+              {dayPlans.map((plan, index) => {
+                const dayNumber = index + 1;
+                const isToday = dayNumber === (target.currentDay || 1);
+                const isCompleted = (target.dailyLogs || []).some(log =>
+                  log.day === dayNumber && log.completed
+                );
+                const hasPlan = plan?.task?.trim();
+
+                return (
+                  <View key={`day-${dayNumber}`} style={styles.dayListItem}>
+                    <View style={styles.dayListItemHeader}>
+                      <View style={styles.dayInfo}>
+                        <Text style={styles.dayNumberText}>
+                          Day {dayNumber}
+                        </Text>
+                        <View style={styles.dayStatusContainer}>
+                          {isToday && (
+                            <View style={styles.todayIndicator}>
+                              <Text style={styles.todayIndicatorText}>Today</Text>
+                            </View>
+                          )}
+                          {isCompleted && (
+                            <View style={styles.completedIndicator}>
+                              <Text style={styles.completedIndicatorText}>✅ Completed</Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.addPlanButton,
+                          hasPlan && styles.editPlanButton
+                        ]}
+                        onPress={() => {
+                          setEditingDayIndex(index);
+                          setDayTaskInput(plan.task || "");
+                          setDayNotesInput(plan.notes || "");
+                        }}
+                      >
+                        <Text style={styles.addPlanButtonText}>
+                          {hasPlan ? "Edit" : "+"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {hasPlan && editingDayIndex !== index && (
+                      <View style={styles.currentPlan}>
+                        <Text style={styles.planTaskText} numberOfLines={2}>
+                          {plan.task}
+                        </Text>
+                        {plan.notes && (
+                          <Text style={styles.planNotesText} numberOfLines={2}>
+                            {plan.notes}
+                          </Text>
+                        )}
+                      </View>
+                    )}
+
+                    {editingDayIndex === index && (
+                      <View style={styles.editPlanForm}>
+                        <TextInput
+                          style={styles.taskInput}
+                          placeholder="What will you learn on this day? (e.g., Watch React Hooks tutorial, Build Todo App)"
+                          value={dayTaskInput}
+                          onChangeText={setDayTaskInput}
+                          multiline
+                          numberOfLines={3}
+                        />
+                        <TextInput
+                          style={styles.notesInputSmall}
+                          placeholder="Additional notes (optional)"
+                          value={dayNotesInput}
+                          onChangeText={setDayNotesInput}
+                          multiline
+                          numberOfLines={2}
+                        />
+                        <View style={styles.editFormButtons}>
+                          <TouchableOpacity
+                            style={[styles.editFormButton, styles.cancelEditButton]}
+                            onPress={() => {
+                              setEditingDayIndex(null);
+                              setDayTaskInput("");
+                              setDayNotesInput("");
+                            }}
+                          >
+                            <Text style={styles.cancelEditButtonText}>Cancel</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.editFormButton, styles.savePlanButton]}
+                            onPress={() => updateDayPlan(target.id, index, dayTaskInput, dayNotesInput)}
+                          >
+                            <Text style={styles.savePlanButtonText}>Save</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+
+              {dayPlans.length === 0 && (
+                <View style={{padding: 20, alignItems: 'center'}}>
+                  <Text style={{color: '#666'}}>No days to plan</Text>
+                </View>
+              )}
+            </ScrollView>
+
+            <View style={styles.plannerFooter}>
+              <TouchableOpacity
+                style={styles.doneButton}
+                onPress={() => {
+                  setDayPlannerModalVisible(false);
+                  setSelectedTargetForPlanner(null);
+                  setEditingDayIndex(null);
+                }}
+              >
+                <Text style={styles.doneButtonText}>Done Planning</Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     );
-  }
+  };
+  // ========== START NEXT DAY MODAL ==========
+const StartNextDayModal = () => {
+  if (!targetForNextDay) return null;
 
   return (
     <Modal
       animationType="slide"
       transparent={true}
-      visible={dayPlannerModalVisible}
+      visible={showStartNextModal}
       onRequestClose={() => {
-        console.log("Closing day planner");
-        setDayPlannerModalVisible(false);
-        setSelectedTargetForPlanner(null);
-        setEditingDayIndex(null);
+        setShowStartNextModal(false);
+        setTargetForNextDay(null);
       }}
     >
       <View style={styles.modalOverlay}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={[styles.modalContent, styles.dayPlannerModal]}
-        >
-          <View style={styles.plannerHeader}>
-            <View>
-              <Text style={styles.plannerTitle}>📝 {target.skillName || target.title}</Text>
-              <Text style={styles.plannerSubtitle}>
-                Plan your {totalDays}-day learning journey
-              </Text>
-              <Text style={{fontSize: 12, color: '#666', marginTop: 4}}>
-                Showing {dayPlans.length} days
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.closePlannerButton}
-              onPress={() => {
-                setDayPlannerModalVisible(false);
-                setSelectedTargetForPlanner(null);
-                setEditingDayIndex(null);
-              }}
-            >
-              <Text style={styles.closePlannerButtonText}>✕</Text>
-            </TouchableOpacity>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>🚀 Start Tomorrow's Task?</Text>
+
+          <View style={styles.nextDayInfo}>
+            <Text style={styles.nextDaySkill}>
+              {targetForNextDay.skillName || targetForNextDay.title}
+            </Text>
+            <Text style={styles.nextDayText}>
+              Day {targetForNextDay.currentDay || 1} completed!
+            </Text>
+            <Text style={styles.nextDaySubtext}>
+              Do you want to start Day {(targetForNextDay.currentDay || 1) + 1} now?
+            </Text>
           </View>
 
-          <View style={styles.dayListHeader}>
-            <Text style={styles.dayListTitle}>Day-by-Day Plan</Text>
-            <TouchableOpacity
-              style={styles.skipPlanningButton}
-              onPress={() => {
-                setDayPlannerModalVisible(false);
-                setSelectedTargetForPlanner(null);
-                setEditingDayIndex(null);
-              }}
-            >
-              <Text style={styles.skipPlanningText}>Skip for now</Text>
-            </TouchableOpacity>
+          <View style={styles.warningBox}>
+            <Text style={styles.warningText}>
+              ⚠️ Note: Starting tomorrow's task early is optional.
+              The task will automatically unlock tomorrow at midnight.
+            </Text>
           </View>
 
-          <ScrollView
-            style={styles.dayListContainer}
-            showsVerticalScrollIndicator={true}
-            contentContainerStyle={{ paddingBottom: 20 }}
-          >
-            {/* DEBUG: Show array info */}
-            <View style={{backgroundColor: '#f0f0f0', padding: 8, borderRadius: 8, marginBottom: 12}}>
-              <Text style={{fontSize: 12, color: '#666'}}>
-                Array length: {dayPlans.length} | Total days: {totalDays}
-              </Text>
-            </View>
-
-            {/* COMPLETE LIST OF DAYS */}
-            {dayPlans.map((plan, index) => {
-              const dayNumber = index + 1;
-              const isToday = dayNumber === (target.currentDay || 1);
-              const isCompleted = (target.dailyLogs || []).some(log =>
-                log.day === dayNumber && log.completed
-              );
-              const hasPlan = plan?.task?.trim();
-
-              return (
-                <View key={`day-${dayNumber}`} style={styles.dayListItem}>
-                  <View style={styles.dayListItemHeader}>
-                    <View style={styles.dayInfo}>
-                      <Text style={styles.dayNumberText}>
-                        Day {dayNumber}
-                      </Text>
-                      <View style={styles.dayStatusContainer}>
-                        {isToday && (
-                          <View style={styles.todayIndicator}>
-                            <Text style={styles.todayIndicatorText}>Today</Text>
-                          </View>
-                        )}
-                        {isCompleted && (
-                          <View style={styles.completedIndicator}>
-                            <Text style={styles.completedIndicatorText}>✅ Completed</Text>
-                          </View>
-                        )}
-                      </View>
-                    </View>
-
-                    <TouchableOpacity
-                      style={[
-                        styles.addPlanButton,
-                        hasPlan && styles.editPlanButton
-                      ]}
-                      onPress={() => {
-                        console.log("Editing day", dayNumber);
-                        setEditingDayIndex(index);
-                        setDayTaskInput(plan.task || "");
-                        setDayNotesInput(plan.notes || "");
-                      }}
-                    >
-                      <Text style={styles.addPlanButtonText}>
-                        {hasPlan ? "Edit" : "+"}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* Show current plan if exists */}
-                  {hasPlan && editingDayIndex !== index && (
-                    <View style={styles.currentPlan}>
-                      <Text style={styles.planTaskText} numberOfLines={2}>
-                        {plan.task}
-                      </Text>
-                      {plan.notes && (
-                        <Text style={styles.planNotesText} numberOfLines={2}>
-                          {plan.notes}
-                        </Text>
-                      )}
-                    </View>
-                  )}
-
-                  {/* Edit Form - Shows when this day is being edited */}
-                  {editingDayIndex === index && (
-                    <View style={styles.editPlanForm}>
-                      <TextInput
-                        style={styles.taskInput}
-                        placeholder="What will you learn on this day? (e.g., Watch React Hooks tutorial, Build Todo App)"
-                        value={dayTaskInput}
-                        onChangeText={setDayTaskInput}
-                        multiline
-                        numberOfLines={3}
-                      />
-                      <TextInput
-                        style={styles.notesInputSmall}
-                        placeholder="Additional notes (optional)"
-                        value={dayNotesInput}
-                        onChangeText={setDayNotesInput}
-                        multiline
-                        numberOfLines={2}
-                      />
-                      <View style={styles.editFormButtons}>
-                        <TouchableOpacity
-                          style={[styles.editFormButton, styles.cancelEditButton]}
-                          onPress={() => {
-                            setEditingDayIndex(null);
-                            setDayTaskInput("");
-                            setDayNotesInput("");
-                          }}
-                        >
-                          <Text style={styles.cancelEditButtonText}>Cancel</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[styles.editFormButton, styles.savePlanButton]}
-                          onPress={() => updateDayPlan(target.id, index, dayTaskInput, dayNotesInput)}
-                        >
-                          <Text style={styles.savePlanButtonText}>Save</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  )}
-                </View>
-              );
-            })}
-
-            {/* If no days show, display message */}
-            {dayPlans.length === 0 && (
-              <View style={{padding: 20, alignItems: 'center'}}>
-                <Text style={{color: '#666'}}>No days to plan</Text>
-              </View>
-            )}
-          </ScrollView>
-
-          <View style={styles.plannerFooter}>
+          <View style={styles.modalButtons}>
             <TouchableOpacity
-              style={styles.doneButton}
+              style={[styles.modalButton, styles.cancelButton]}
               onPress={() => {
-                setDayPlannerModalVisible(false);
-                setSelectedTargetForPlanner(null);
-                setEditingDayIndex(null);
+                setShowStartNextModal(false);
+                setTargetForNextDay(null);
               }}
             >
-              <Text style={styles.doneButtonText}>Done Planning</Text>
+              <Text style={styles.cancelButtonText}>Not Now</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.modalButton, styles.startNextButton]}
+              onPress={() => startNextDay(targetForNextDay.id)}
+            >
+              <Text style={styles.startNextButtonText}>Start Tomorrow</Text>
             </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
+        </View>
       </View>
     </Modal>
   );
 };
+
+  // Clear search function
+  const clearSearch = () => {
+    setSearchQuery("");
+  };
 
   return (
     <View style={styles.container}>
@@ -788,106 +864,192 @@ const DayPlannerModal = () => {
         </TouchableOpacity>
       </View>
 
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchInputContainer}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search skills..."
+            placeholderTextColor="#999"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={clearSearch} style={styles.clearButton}>
+              <Text style={styles.clearButtonText}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Search results info */}
+        {searchQuery.length > 0 && (
+          <View style={styles.searchInfoContainer}>
+            <Text style={styles.searchInfoText}>
+              Found {filteredTargets.length} skill{filteredTargets.length !== 1 ? 's' : ''} matching "{searchQuery}"
+            </Text>
+          </View>
+        )}
+      </View>
+
       {/* Skills List */}
       <FlatList
-        data={targets}
+        data={filteredTargets}
         keyExtractor={(item) => item.id.toString()}
         renderItem={renderTarget}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No skills yet</Text>
-            <Text style={styles.emptyText}>
-              Add your first skill to start tracking progress!
-            </Text>
+            {searchQuery.length > 0 ? (
+              <>
+                <Text style={styles.emptyTitle}>No skills found</Text>
+                <Text style={styles.emptyText}>
+                  No skills match "{searchQuery}"
+                </Text>
+                <TouchableOpacity
+                  style={styles.clearSearchEmptyButton}
+                  onPress={clearSearch}
+                >
+                  <Text style={styles.clearSearchEmptyText}>Clear search</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={styles.emptyTitle}>No skills yet</Text>
+                <Text style={styles.emptyText}>
+                  Add your first skill to start tracking progress!
+                </Text>
+              </>
+            )}
           </View>
         }
         contentContainerStyle={{ paddingBottom: 20 }}
       />
 
-      {/* Add Skill Modal */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={addSkillModalVisible}
-        onRequestClose={() => setAddSkillModalVisible(false)}
+{/* Add Skill Modal */}
+<Modal
+  animationType="slide"
+  transparent={true}
+  visible={addSkillModalVisible}
+  onRequestClose={() => setAddSkillModalVisible(false)}
+>
+  <View style={styles.modalOverlay}>
+    <View style={styles.modalContent}>
+      <Text style={styles.modalTitle}>➕ Add New Skill</Text>
+
+      {/* Scrollable content area */}
+      <ScrollView
+        style={styles.formScrollView}
+        showsVerticalScrollIndicator={true}
+        contentContainerStyle={styles.formScrollContent}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>➕ Add New Skill</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Skill name (e.g., React, Guitar, Spanish)"
+          value={skillName}
+          onChangeText={setSkillName}
+        />
 
-            <TextInput
-              style={styles.input}
-              placeholder="Skill name (e.g., React, Guitar)"
-              value={skillName}
-              onChangeText={setSkillName}
-            />
-
-            <Text style={styles.label}>Total Days:</Text>
-            <View style={styles.optionRow}>
-              {["30", "60", "90"].map((days) => (
-                <TouchableOpacity
-                  key={days}
-                  style={[
-                    styles.optionButton,
-                    totalDays === days && styles.optionButtonActive
-                  ]}
-                  onPress={() => setTotalDays(days)}
-                >
-                  <Text style={[
-                    styles.optionText,
-                    totalDays === days && styles.optionTextActive
-                  ]}>
-                    {days} days
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <Text style={styles.label}>Daily Time:</Text>
-            <View style={styles.optionRow}>
-              {["15", "30", "45", "60"].map((minutes) => (
-                <TouchableOpacity
-                  key={minutes}
-                  style={[
-                    styles.optionButton,
-                    dailyMinutes === minutes && styles.optionButtonActive
-                  ]}
-                  onPress={() => setDailyMinutes(minutes)}
-                >
-                  <Text style={[
-                    styles.optionText,
-                    dailyMinutes === minutes && styles.optionTextActive
-                  ]}>
-                    {minutes}m
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => setAddSkillModalVisible(false)}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modalButton, styles.createButton]}
-                onPress={createTarget}
-              >
-                <Text style={styles.createButtonText}>Start Learning</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+        <Text style={styles.label}>Total Days:</Text>
+        <View style={styles.optionGrid}>
+          {daysOptions.map((option) => (
+            <TouchableOpacity
+              key={option.value}
+              style={[
+                styles.optionButton,
+                selectedDaysOption === option.value && styles.optionButtonActive,
+                option.value === "custom" && styles.customOptionButton
+              ]}
+              onPress={() => setSelectedDaysOption(option.value)}
+            >
+              <Text style={[
+                styles.optionText,
+                selectedDaysOption === option.value && styles.optionTextActive
+              ]}>
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
-      </Modal>
+
+        {/* Custom Days Input */}
+        {selectedDaysOption === "custom" && (
+          <View style={styles.customInputContainer}>
+            <TextInput
+              style={styles.customInput}
+              placeholder="Enter number of days"
+              value={customDays}
+              onChangeText={setCustomDays}
+              keyboardType="numeric"
+            />
+            <Text style={styles.customInputHint}>e.g., 45, 100, 365</Text>
+          </View>
+        )}
+
+        <Text style={styles.label}>Daily Time:</Text>
+        <View style={styles.optionGrid}>
+          {minutesOptions.map((option) => (
+            <TouchableOpacity
+              key={option.value}
+              style={[
+                styles.optionButton,
+                selectedMinutesOption === option.value && styles.optionButtonActive,
+                option.value === "custom" && styles.customOptionButton
+              ]}
+              onPress={() => setSelectedMinutesOption(option.value)}
+            >
+              <Text style={[
+                styles.optionText,
+                selectedMinutesOption === option.value && styles.optionTextActive
+              ]}>
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Custom Minutes Input */}
+        {selectedMinutesOption === "custom" && (
+          <View style={styles.customInputContainer}>
+            <TextInput
+              style={styles.customInput}
+              placeholder="Enter minutes per day"
+              value={customMinutes}
+              onChangeText={setCustomMinutes}
+              keyboardType="numeric"
+            />
+            <Text style={styles.customInputHint}>e.g., 10, 90, 180 (1.5 hours = 90)</Text>
+          </View>
+        )}
+      </ScrollView>
+
+      {/* Buttons - Fixed at bottom */}
+      <View style={styles.modalButtons}>
+        <TouchableOpacity
+          style={[styles.modalButton, styles.cancelButton]}
+          onPress={() => setAddSkillModalVisible(false)}
+        >
+          <Text style={styles.cancelButtonText}>Cancel</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.modalButton, styles.createButton]}
+          onPress={createTarget}
+        >
+          <Text style={styles.createButtonText}>Start Learning</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  </View>
+</Modal>
 
       {/* Day Check-in Modal */}
       <DayCheckInModal />
 
       {/* Day Planner Modal */}
       <DayPlannerModal />
+          <StartNextDayModal /> {/* <-- ADD THIS LINE */}
     </View>
   );
 };
@@ -920,6 +1082,53 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
+  // Search Bar Styles
+  searchContainer: {
+    marginBottom: 20,
+  },
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  searchIcon: {
+    fontSize: 18,
+    marginRight: 10,
+    color: '#666',
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333',
+    padding: 0,
+  },
+  clearButton: {
+    padding: 4,
+  },
+  clearButtonText: {
+    fontSize: 18,
+    color: '#999',
+    fontWeight: 'bold',
+  },
+  searchInfoContainer: {
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  searchInfoText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  // Card styles
   card: {
     backgroundColor: '#fff',
     padding: 16,
@@ -1026,6 +1235,17 @@ const styles = StyleSheet.create({
     color: '#999',
     textAlign: 'center',
     paddingHorizontal: 40,
+    marginBottom: 16,
+  },
+  clearSearchEmptyButton: {
+    backgroundColor: '#4a90e2',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  clearSearchEmptyText: {
+    color: '#fff',
+    fontWeight: '600',
   },
   // Modal styles
   modalOverlay: {
@@ -1035,25 +1255,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 24,
-    width: '100%',
-    maxWidth: 500,
-    maxHeight: '80%',
-  },
+modalContent: {
+  backgroundColor: '#fff',
+  borderRadius: 16,
+  padding: 24,
+  width: '100%',
+  maxWidth: 500,
+  maxHeight: '85%',
+  minHeight: 400,
+  justifyContent: 'space-between', // Add this
+},
   modalTitle: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  modalSubtitle: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 20,
+    marginBottom: 16,
     textAlign: 'center',
   },
   input: {
@@ -1061,39 +1277,63 @@ const styles = StyleSheet.create({
     borderColor: '#ddd',
     padding: 12,
     borderRadius: 8,
-    marginBottom: 16,
+    marginBottom: 20,
     fontSize: 16,
   },
   label: {
     fontSize: 14,
     fontWeight: '600',
     color: '#333',
-    marginBottom: 8,
+    marginBottom: 10,
   },
-  optionRow: {
+  // Grid layout for options
+  optionGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   optionButton: {
-    flex: 1,
-    padding: 12,
-    marginHorizontal: 4,
+    width: '48%',
+    padding: 14,
+    marginBottom: 10,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#ddd',
     alignItems: 'center',
+    backgroundColor: '#fff',
   },
   optionButtonActive: {
     backgroundColor: '#4a90e2',
     borderColor: '#4a90e2',
   },
+  customOptionButton: {
+    width: '100%',
+  },
   optionText: {
     color: '#666',
     fontWeight: '500',
+    fontSize: 14,
   },
   optionTextActive: {
     color: '#fff',
+  },
+  // Custom input styles
+  customInputContainer: {
+    marginBottom: 20,
+  },
+  customInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    padding: 12,
+    borderRadius: 8,
+    fontSize: 16,
+    marginBottom: 6,
+  },
+  customInputHint: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 4,
   },
   notesInput: {
     borderWidth: 1,
@@ -1127,11 +1367,14 @@ const styles = StyleSheet.create({
     color: '#666',
     fontStyle: 'italic',
   },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 16,
-  },
+modalButtons: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  marginTop: 'auto', // This pushes buttons to bottom
+  paddingTop: 16,
+  borderTopWidth: 1,
+  borderTopColor: '#eee',
+},
   modalButton: {
     flex: 1,
     padding: 14,
@@ -1176,7 +1419,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // ========== DAY PLANNER MODAL STYLES ==========
+  // Day Planner Modal Styles
   dayPlannerModal: {
     maxHeight: '90%',
     padding: 16,
@@ -1390,6 +1633,53 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
     fontSize: 16,
+  },
+    formScrollView: {
+    flex: 1,
+    marginBottom: 16,
+  },
+  formScrollContent: {
+    paddingBottom: 10, // Extra padding at bottom of scroll
+  },
+   nextDayInfo: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  nextDaySkill: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+  },
+  nextDayText: {
+    fontSize: 16,
+    color: '#28a745',
+    marginBottom: 4,
+  },
+  nextDaySubtext: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+  },
+  warningBox: {
+    backgroundColor: '#fff3cd',
+    borderColor: '#ffeaa7',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 20,
+  },
+  warningText: {
+    fontSize: 12,
+    color: '#856404',
+    textAlign: 'center',
+  },
+  startNextButton: {
+    backgroundColor: '#ffc107',
+  },
+  startNextButtonText: {
+    color: '#333',
+    fontWeight: '600',
   },
 });
 

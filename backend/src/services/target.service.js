@@ -174,6 +174,116 @@ const update = async (req, res) => {
   }
 };
 
+// ---------------- GET TODAY'S TARGETS ----------------
+const getTodayTargets = async (req, res) => {
+  try {
+    const targets = await Target.findAll({
+      where: { userId: req.userId },
+    });
+
+    const today = new Date().toISOString().split('T')[0];
+
+    // Process each target to check if today is completed
+    const processedTargets = targets.map(target => {
+      const dailyLogs = target.dailyLogs || [];
+      const todayLog = dailyLogs.find(log => {
+        if (!log.date) return false;
+        const logDate = new Date(log.date).toISOString().split('T')[0];
+        return logDate === today;
+      });
+
+      return {
+        ...target.toJSON(),
+        isCompletedToday: todayLog?.completed || false,
+        todayLog: todayLog || null
+      };
+    });
+
+    res.json({ success: true, result: processedTargets });
+  } catch (error) {
+    console.error('Get today targets error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+// ---------------- CHECK IF CAN START NEXT DAY ----------------
+const canStartNextDay = async (req, res) => {
+  try {
+    const target = await Target.findOne({
+      where: { id: req.params.id, userId: req.userId },
+    });
+
+    if (!target)
+      return res.status(404).json({ success: false, message: 'Target not found' });
+
+    const today = new Date().toISOString().split('T')[0];
+    const dailyLogs = target.dailyLogs || [];
+
+    // Check if today's task is completed
+    const todayLog = dailyLogs.find(log => {
+      if (!log.date) return false;
+      const logDate = new Date(log.date).toISOString().split('T')[0];
+      return logDate === today;
+    });
+
+    const canStartNext = todayLog?.completed === true;
+
+    res.json({
+      success: true,
+      result: {
+        canStartNext,
+        currentDay: target.currentDay,
+        todayCompleted: todayLog?.completed || false
+      }
+    });
+  } catch (error) {
+    console.error('Can start next day error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ---------------- MANUALLY START NEXT DAY ----------------
+const startNextDayManually = async (req, res) => {
+  try {
+    const target = await Target.findOne({
+      where: { id: req.params.id, userId: req.userId },
+    });
+
+    if (!target)
+      return res.status(404).json({ success: false, message: 'Target not found' });
+
+    const today = new Date().toISOString().split('T')[0];
+    const dailyLogs = target.dailyLogs || [];
+
+    // Check if today's task is completed
+    const todayLog = dailyLogs.find(log => {
+      if (!log.date) return false;
+      const logDate = new Date(log.date).toISOString().split('T')[0];
+      return logDate === today;
+    });
+
+    if (!todayLog || !todayLog.completed) {
+      return res.status(400).json({
+        success: false,
+        message: 'Complete today\'s task first before starting tomorrow\'s task'
+      });
+    }
+
+    // Increment currentDay ONLY (not completed count)
+    await target.update({
+      currentDay: target.currentDay + 1
+    });
+
+    res.json({
+      success: true,
+      result: target,
+      message: 'Tomorrow\'s task is now available. Good luck!'
+    });
+  } catch (error) {
+    console.error('Start next day manually error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   getAll,
   create,
@@ -183,5 +293,8 @@ module.exports = {
   addMilestone,
 
   update,
+  getTodayTargets,
+    canStartNextDay,        // Add this
+  startNextDayManually,    // Add this
 
 };
