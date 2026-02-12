@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { API_BASE_URL } from "../constants/api";
 import {
   View,
   Text,
@@ -13,9 +14,10 @@ import {
   Platform,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const API = axios.create({
-  baseURL: "http://192.168.10.116:5000",
+  baseURL: API_BASE_URL,
 });
 
 API.interceptors.request.use(async (config) => {
@@ -28,6 +30,7 @@ API.interceptors.request.use(async (config) => {
 
 const DayPlannerScreen = () => {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   const targetId = params.targetId;
 
@@ -141,18 +144,22 @@ const DayPlannerScreen = () => {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <Text>Loading...</Text>
+      <View style={styles.centerState}>
+        <Text style={styles.stateTitle}>Loading planner...</Text>
+        <Text style={styles.stateSubtitle}>Preparing your day-by-day schedule.</Text>
       </View>
     );
   }
 
   if (!target) {
     return (
-      <View style={styles.container}>
-        <Text>Target not found</Text>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backButton}>Go Back</Text>
+      <View style={styles.centerState}>
+        <Text style={styles.stateTitle}>Target not found</Text>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.stateBackButton}
+        >
+          <Text style={styles.stateBackButtonText}>Go Back</Text>
         </TouchableOpacity>
       </View>
     );
@@ -164,12 +171,12 @@ const DayPlannerScreen = () => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <TouchableOpacity onPress={() => router.push("/(dashboard)/target")} style={styles.backButton}>
-          <Text style={styles.backButtonText}>← Back</Text>
+          <Text style={styles.backButtonText}>←</Text>
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <Text style={styles.title}>📝 {target.skillName || target.title}</Text>
+          <Text style={styles.title}>{target.skillName || target.title}</Text>
           <Text style={styles.subtitle}>
             Plan your {totalDays}-day learning journey
           </Text>
@@ -177,15 +184,21 @@ const DayPlannerScreen = () => {
       </View>
 
       <View style={styles.statsBar}>
-        <Text style={styles.statsText}>
-          {plannedDays} of {totalDays} days planned
-        </Text>
-        <Text style={styles.statsText}>
-          Current: Day {target.currentDay || 1}
-        </Text>
+        <View style={styles.statChip}>
+          <Text style={styles.statChipValue}>{plannedDays}/{totalDays}</Text>
+          <Text style={styles.statChipLabel}>Days Planned</Text>
+        </View>
+        <View style={styles.statChip}>
+          <Text style={styles.statChipValue}>Day {target.currentDay || 1}</Text>
+          <Text style={styles.statChipLabel}>Current Day</Text>
+        </View>
       </View>
 
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={true}>
+      <ScrollView
+        style={styles.scrollView}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
         <View style={styles.daysList}>
           {dayPlans.map((plan, index) => {
             const dayNumber = index + 1;
@@ -196,7 +209,14 @@ const DayPlannerScreen = () => {
             const hasPlan = plan?.task?.trim();
 
             return (
-              <View key={`day-${dayNumber}`} style={styles.dayCard}>
+              <View
+                key={`day-${dayNumber}`}
+                style={[
+                  styles.dayCard,
+                  isToday && styles.dayCardToday,
+                  isCompleted && styles.dayCardCompleted,
+                ]}
+              >
                 <View style={styles.dayHeader}>
                   <View style={styles.dayInfo}>
                     <Text style={styles.dayNumber}>Day {dayNumber}</Text>
@@ -226,7 +246,7 @@ const DayPlannerScreen = () => {
                     }}
                   >
                     <Text style={styles.addButtonText}>
-                      {hasPlan ? "Edit" : "+"}
+                      {hasPlan ? "Edit Plan" : "Set Plan"}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -299,86 +319,144 @@ const DayPlannerScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f4f6f8',
+  },
+  centerState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    backgroundColor: '#f4f6f8',
+  },
+  stateTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#1f2937",
+    marginBottom: 8,
+  },
+  stateSubtitle: {
+    fontSize: 14,
+    color: "#6b7280",
+    textAlign: "center",
+  },
+  stateBackButton: {
+    marginTop: 16,
+    backgroundColor: "#4a90e2",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  stateBackButtonText: {
+    color: "#fff",
+    fontWeight: "600",
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    backgroundColor: '#f4f6f8',
+    paddingHorizontal: 16,
+    paddingBottom: 10,
   },
   backButton: {
-    marginRight: 15,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
   },
   backButtonText: {
-    fontSize: 16,
-    color: '#4a90e2',
+    fontSize: 22,
+    color: '#1f2937',
     fontWeight: '600',
+    marginTop: -1,
   },
   headerContent: {
     flex: 1,
   },
   title: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 4,
+    color: '#111827',
+    marginBottom: 2,
   },
   subtitle: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 13,
+    color: '#6b7280',
   },
   statsBar: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    padding: 15,
-    marginBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    gap: 10,
+    paddingHorizontal: 16,
+    marginBottom: 8,
   },
-  statsText: {
-    fontSize: 14,
-    color: '#666',
+  statChip: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#eef2f7',
+  },
+  statChipValue: {
+    fontSize: 15,
+    color: '#111827',
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  statChipLabel: {
+    fontSize: 12,
+    color: '#6b7280',
     fontWeight: '500',
   },
   scrollView: {
     flex: 1,
-    padding: 15,
+    paddingHorizontal: 16,
+  },
+  scrollContent: {
+    paddingBottom: 22,
   },
   daysList: {
-    paddingBottom: 30,
+    paddingBottom: 6,
   },
   dayCard: {
     backgroundColor: '#fff',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
+    padding: 14,
+    borderRadius: 14,
+    marginBottom: 10,
     borderWidth: 1,
-    borderColor: '#eee',
+    borderColor: '#e9edf3',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowOpacity: 0.03,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  dayCardToday: {
+    borderColor: '#bfdbfe',
+    backgroundColor: '#f8fbff',
+  },
+  dayCardCompleted: {
+    borderColor: '#d1fae5',
+    backgroundColor: '#f7fffb',
   },
   dayHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
+    alignItems: 'flex-start',
+    marginBottom: 10,
   },
   dayInfo: {
     flex: 1,
   },
   dayNumber: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#111827',
     marginBottom: 6,
   },
   statusContainer: {
@@ -386,75 +464,76 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   todayBadge: {
-    backgroundColor: '#e8f5e8',
+    backgroundColor: '#dbeafe',
     paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
+    paddingVertical: 4,
+    borderRadius: 6,
     alignSelf: 'flex-start',
   },
   todayBadgeText: {
     fontSize: 12,
-    color: '#28a745',
+    color: '#1d4ed8',
     fontWeight: '600',
   },
   completedBadge: {
-    backgroundColor: '#e7f3ff',
+    backgroundColor: '#dcfce7',
     paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
+    paddingVertical: 4,
+    borderRadius: 6,
     alignSelf: 'flex-start',
   },
   completedBadgeText: {
     fontSize: 12,
-    color: '#4a90e2',
+    color: '#15803d',
     fontWeight: '600',
   },
   addButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#28a745',
+    minWidth: 92,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: '#1d4ed8',
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 12,
+    paddingHorizontal: 10,
   },
   editButton: {
-    backgroundColor: '#4a90e2',
+    backgroundColor: '#0f766e',
   },
   addButtonText: {
     color: '#fff',
-    fontSize: 20,
-    fontWeight: 'bold',
+    fontSize: 12,
+    fontWeight: '700',
   },
   currentPlan: {
-    marginTop: 12,
-    paddingTop: 12,
+    marginTop: 4,
+    paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: '#eee',
+    borderTopColor: '#eef2f7',
   },
   planTask: {
-    fontSize: 15,
-    color: '#333',
+    fontSize: 14,
+    color: '#1f2937',
     fontWeight: '500',
     marginBottom: 4,
   },
   planNotes: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 13,
+    color: '#6b7280',
     fontStyle: 'italic',
   },
   editForm: {
-    marginTop: 12,
-    paddingTop: 12,
+    marginTop: 10,
+    paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: '#ddd',
+    borderTopColor: '#e5e7eb',
   },
   taskInput: {
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#d1d5db',
     padding: 12,
-    borderRadius: 8,
-    fontSize: 15,
+    borderRadius: 10,
+    fontSize: 14,
     backgroundColor: '#fff',
     minHeight: 90,
     textAlignVertical: 'top',
@@ -462,10 +541,10 @@ const styles = StyleSheet.create({
   },
   notesInput: {
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#d1d5db',
     padding: 12,
-    borderRadius: 8,
-    fontSize: 15,
+    borderRadius: 10,
+    fontSize: 14,
     backgroundColor: '#fff',
     minHeight: 70,
     textAlignVertical: 'top',
@@ -479,19 +558,19 @@ const styles = StyleSheet.create({
   formButton: {
     flex: 1,
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 10,
     alignItems: 'center',
   },
   cancelButton: {
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#e5e7eb',
   },
   cancelButtonText: {
-    color: '#666',
+    color: '#374151',
     fontWeight: '600',
     fontSize: 14,
   },
   saveButton: {
-    backgroundColor: '#28a745',
+    backgroundColor: '#1d4ed8',
   },
   saveButtonText: {
     color: '#fff',

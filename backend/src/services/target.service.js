@@ -62,9 +62,24 @@ const markDayComplete = async (req, res) => {
 
     const { notes, timeSpent } = req.body;
     const currentDay = target.currentDay;
+    const todayKey = new Date().toISOString().split('T')[0];
+    const dailyLogs = target.dailyLogs || [];
+
+    const alreadyCompletedToday = dailyLogs.some((log) => {
+      if (!log.date || !log.completed) return false;
+      const logDate = new Date(log.date).toISOString().split('T')[0];
+      return logDate === todayKey;
+    });
+
+    if (alreadyCompletedToday) {
+      return res.status(400).json({
+        success: false,
+        message: 'Today is already marked complete for this target',
+      });
+    }
 
     // Update daily logs
-    const updatedLogs = [...(target.dailyLogs || []), {
+    const updatedLogs = [...dailyLogs, {
       day: currentDay,
       date: new Date(),
       completed: true,
@@ -88,7 +103,7 @@ const markDayComplete = async (req, res) => {
     // Update target
     await target.update({
       dailyLogs: updatedLogs,
-      currentDay: currentDay + 1,
+      currentDay: Math.min(currentDay + 1, target.totalDays || target.total || currentDay + 1),
       streak: newStreak,
       lastCompleted: today,
       completed: Math.min(target.completed + 1, target.totalDays || target.total)
@@ -111,8 +126,23 @@ const skipDay = async (req, res) => {
     if (!target)
       return res.status(404).json({ success: false, message: 'Target not found' });
 
+    const todayKey = new Date().toISOString().split('T')[0];
+    const dailyLogs = target.dailyLogs || [];
+    const alreadyLoggedToday = dailyLogs.some((log) => {
+      if (!log.date) return false;
+      const logDate = new Date(log.date).toISOString().split('T')[0];
+      return logDate === todayKey;
+    });
+
+    if (alreadyLoggedToday) {
+      return res.status(400).json({
+        success: false,
+        message: 'Today already has a log entry for this target',
+      });
+    }
+
     // Add skipped day to logs
-    const updatedLogs = [...(target.dailyLogs || []), {
+    const updatedLogs = [...dailyLogs, {
       day: target.currentDay,
       date: new Date(),
       completed: false,
@@ -123,7 +153,8 @@ const skipDay = async (req, res) => {
     // Reset streak
     await target.update({
       dailyLogs: updatedLogs,
-      currentDay: target.currentDay + 1,
+      // Do not advance day on skip; next completion should count for the same day.
+      currentDay: target.currentDay,
       streak: 0
     });
 
@@ -268,9 +299,34 @@ const startNextDayManually = async (req, res) => {
       });
     }
 
+    const todayCompletedDay = Number(todayLog.day || 0);
+    const currentDay = Number(target.currentDay || 1);
+    const totalDays = Number(target.totalDays || target.total || currentDay);
+
+    // If user already unlocked next day for today once, do not increment again.
+    // After normal completion, currentDay = todayCompletedDay + 1.
+    // After manual "start next", currentDay = todayCompletedDay + 2.
+    if (currentDay > todayCompletedDay + 1) {
+      return res.json({
+        success: true,
+        result: target,
+        message: 'Next day is already unlocked for today'
+      });
+    }
+
+    if (currentDay >= totalDays) {
+      return res.status(400).json({
+        success: false,
+        message: 'You are already on the final day',
+      });
+    }
+
     // Increment currentDay ONLY (not completed count)
     await target.update({
-      currentDay: target.currentDay + 1
+      currentDay: Math.min(
+        currentDay + 1,
+        totalDays
+      )
     });
 
     res.json({

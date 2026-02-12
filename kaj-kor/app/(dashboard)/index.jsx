@@ -1,10 +1,11 @@
 // kaj-kor/app/(dashboard)/index.jsx
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from 'expo-router';
+import { API_BASE_URL } from '../constants/api';
 import {
     View,
     Text,
@@ -18,21 +19,22 @@ import {
     RefreshControl,
     Modal,
     ActivityIndicator,
-        Alert // <-- ADD THIS IMPORT
+    Alert, // <-- ADD THIS IMPORT
+    AppState,
 } from 'react-native';
 
 const API = axios.create({
-    baseURL: 'http://192.168.10.116:5000'
+    baseURL: API_BASE_URL,
 });
 
 API.interceptors.request.use(async (config) => {
     try {
-        const token = await AsyncStorage.getItem("token");
+        const token = await AsyncStorage.getItem('token');
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
         }
     } catch (err) {
-        console.log("[TOKEN ERROR]", err);
+        console.log('[TOKEN ERROR]', err);
     }
     return config;
 });
@@ -42,6 +44,7 @@ API.interceptors.request.use(async (config) => {
 // Schedule Item Component
 const ScheduleItem = ({ item, onComplete, onSkip, type }) => {
     const isTargetTask = type === 'target';
+    const displayDay = item.displayDay || item.currentDay || 1;
 
     const getTimeInfo = () => {
         if (!item.deadline && !isTargetTask) return null;
@@ -50,7 +53,7 @@ const ScheduleItem = ({ item, onComplete, onSkip, type }) => {
             return {
                 time: `${item.dailyMinutes || 30}m`,
                 color: '#4a90e2',
-                icon: '🎯'
+                icon: '🎯',
             };
         }
 
@@ -67,8 +70,8 @@ const ScheduleItem = ({ item, onComplete, onSkip, type }) => {
 
             if (period) {
                 period = period.toUpperCase();
-                if (period === "PM" && hour < 12) hour += 12;
-                if (period === "AM" && hour === 12) hour = 0;
+                if (period === 'PM' && hour < 12) hour += 12;
+                if (period === 'AM' && hour === 12) hour = 0;
             }
 
             const now = new Date();
@@ -76,17 +79,17 @@ const ScheduleItem = ({ item, onComplete, onSkip, type }) => {
             deadline.setHours(hour, minute, 0, 0);
 
             const diff = deadline - now;
-            if (diff <= 0) return { text: "⏰ Time's up", color: "#dc3545" };
+            if (diff <= 0) return { text: "⏰ Time's up", color: '#dc3545' };
 
             const h = Math.floor(diff / (1000 * 60 * 60));
             const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
 
             if (h > 0) {
-                return { text: `${h}h ${m}m left`, color: "#28a745" };
+                return { text: `${h}h ${m}m left`, color: '#28a745' };
             } else if (m > 30) {
-                return { text: `${m}m left`, color: "#ffc107" };
+                return { text: `${m}m left`, color: '#ffc107' };
             } else {
-                return { text: `${m}m left`, color: "#fd7e14" };
+                return { text: `${m}m left`, color: '#fd7e14' };
             }
         };
 
@@ -97,30 +100,41 @@ const ScheduleItem = ({ item, onComplete, onSkip, type }) => {
     const timeInfo = getTimeInfo();
 
     return (
-        <View style={[
-            scheduleStyles.item,
-            item.isCompleted && scheduleStyles.itemCompleted
-        ]}>
+        <View
+            style={[
+                scheduleStyles.item,
+                item.isCompleted && scheduleStyles.itemCompleted,
+            ]}
+        >
             <View style={scheduleStyles.itemLeft}>
                 <TouchableOpacity
                     onPress={() => onComplete(item.id, type)}
                     style={scheduleStyles.checkContainer}
                 >
-                    <View style={[
-                        scheduleStyles.checkbox,
-                        item.isCompleted && scheduleStyles.checkboxChecked
-                    ]}>
-                        {item.isCompleted && <Text style={scheduleStyles.checkMark}>✓</Text>}
+                    <View
+                        style={[
+                            scheduleStyles.checkbox,
+                            item.isCompleted && scheduleStyles.checkboxChecked,
+                        ]}
+                    >
+                        {item.isCompleted && (
+                            <Text style={scheduleStyles.checkMark}>✓</Text>
+                        )}
                     </View>
                 </TouchableOpacity>
 
                 <View style={scheduleStyles.content}>
                     <View style={scheduleStyles.headerRow}>
-                        <Text style={[
-                            scheduleStyles.title,
-                            item.isCompleted && scheduleStyles.titleCompleted
-                        ]}>
-                            {isTargetTask ? item.skillName || item.title : item.title}
+                        <Text
+                            style={[
+                                scheduleStyles.title,
+                                item.isCompleted &&
+                                    scheduleStyles.titleCompleted,
+                            ]}
+                        >
+                            {isTargetTask
+                                ? item.skillName || item.title
+                                : item.title}
                         </Text>
                         <View style={scheduleStyles.typeBadge}>
                             <Text style={scheduleStyles.typeText}>
@@ -132,10 +146,13 @@ const ScheduleItem = ({ item, onComplete, onSkip, type }) => {
                     {isTargetTask && (
                         <View style={scheduleStyles.targetInfo}>
                             <Text style={scheduleStyles.dayInfo}>
-                                Day {item.currentDay || 1} of {item.totalDays}
+                                Day {displayDay} of {item.totalDays}
                                 {item.dayPlan?.task && ' · '}
                                 {item.dayPlan?.task && (
-                                    <Text style={scheduleStyles.dayTask} numberOfLines={1}>
+                                    <Text
+                                        style={scheduleStyles.dayTask}
+                                        numberOfLines={1}
+                                    >
                                         {item.dayPlan.task}
                                     </Text>
                                 )}
@@ -144,7 +161,12 @@ const ScheduleItem = ({ item, onComplete, onSkip, type }) => {
                     )}
 
                     {!isTargetTask && item.deadline && timeInfo && (
-                        <Text style={[scheduleStyles.deadline, { color: timeInfo.color }]}>
+                        <Text
+                            style={[
+                                scheduleStyles.deadline,
+                                { color: timeInfo.color },
+                            ]}
+                        >
                             ⏰ {item.deadline} · {timeInfo.text}
                         </Text>
                     )}
@@ -182,8 +204,10 @@ const ScheduleItem = ({ item, onComplete, onSkip, type }) => {
 
 // Daily Stats Component
 const DailyStats = ({ targetTasks, manualTasks, onRefresh }) => {
-    const completedTargets = targetTasks.filter(t => t.isCompletedToday || t.isCompleted).length;
-    const completedManual = manualTasks.filter(t => t.isCompleted).length;
+    const completedTargets = targetTasks.filter(
+        (t) => t.isCompletedToday || t.isCompleted,
+    ).length;
+    const completedManual = manualTasks.filter((t) => t.isCompleted).length;
     const totalTasks = targetTasks.length + manualTasks.length;
     const completedTasks = completedTargets + completedManual;
     const progress = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
@@ -191,7 +215,7 @@ const DailyStats = ({ targetTasks, manualTasks, onRefresh }) => {
     // Calculate total time for remaining target tasks
     const calculateTotalTime = () => {
         const totalMinutes = targetTasks
-            .filter(task => !(task.isCompletedToday || task.isCompleted))
+            .filter((task) => !(task.isCompletedToday || task.isCompleted))
             .reduce((sum, task) => sum + (task.dailyMinutes || 30), 0);
 
         if (totalMinutes < 60) return `${totalMinutes}m`;
@@ -204,7 +228,10 @@ const DailyStats = ({ targetTasks, manualTasks, onRefresh }) => {
         <View style={statsStyles.container}>
             <View style={statsStyles.header}>
                 <Text style={statsStyles.headerTitle}>📊 Today's Progress</Text>
-                <TouchableOpacity onPress={onRefresh} style={statsStyles.refreshButton}>
+                <TouchableOpacity
+                    onPress={onRefresh}
+                    style={statsStyles.refreshButton}
+                >
                     <Text style={statsStyles.refreshText}>🔄</Text>
                 </TouchableOpacity>
             </View>
@@ -212,27 +239,37 @@ const DailyStats = ({ targetTasks, manualTasks, onRefresh }) => {
             <View style={statsStyles.progressContainer}>
                 <View style={statsStyles.progressBar}>
                     <View
-                        style={[statsStyles.progressFill, { width: `${progress}%` }]}
+                        style={[
+                            statsStyles.progressFill,
+                            { width: `${progress}%` },
+                        ]}
                     />
                 </View>
                 <Text style={statsStyles.progressText}>
-                    {completedTasks}/{totalTasks} tasks ({Math.round(progress)}%)
+                    {completedTasks}/{totalTasks} tasks ({Math.round(progress)}
+                    %)
                 </Text>
             </View>
 
             <View style={statsStyles.statsGrid}>
                 <View style={statsStyles.statBox}>
-                    <Text style={statsStyles.statNumber}>🎯 {completedTargets}/{targetTasks.length}</Text>
+                    <Text style={statsStyles.statNumber}>
+                        🎯 {completedTargets}/{targetTasks.length}
+                    </Text>
                     <Text style={statsStyles.statLabel}>Skills</Text>
                 </View>
 
                 <View style={statsStyles.statBox}>
-                    <Text style={statsStyles.statNumber}>✅ {completedManual}/{manualTasks.length}</Text>
+                    <Text style={statsStyles.statNumber}>
+                        ✅ {completedManual}/{manualTasks.length}
+                    </Text>
                     <Text style={statsStyles.statLabel}>Tasks</Text>
                 </View>
 
                 <View style={statsStyles.statBox}>
-                    <Text style={statsStyles.statNumber}>⏱️ {calculateTotalTime()}</Text>
+                    <Text style={statsStyles.statNumber}>
+                        ⏱️ {calculateTotalTime()}
+                    </Text>
                     <Text style={statsStyles.statLabel}>Remaining Time</Text>
                 </View>
             </View>
@@ -260,54 +297,67 @@ const DailyScheduleScreen = () => {
     const [selectedTask, setSelectedTask] = useState(null);
     const [taskNotes, setTaskNotes] = useState('');
     const [completingTaskType, setCompletingTaskType] = useState(null);
+    const lastFetchedDateRef = useRef(
+        new Date().toISOString().split('T')[0],
+    );
 
     useFocusEffect(
         useCallback(() => {
             fetchTodaySchedule();
-        }, [])
+        }, []),
     );
 
     const fetchTodaySchedule = async () => {
         try {
             setLoading(true);
+            lastFetchedDateRef.current = new Date().toISOString().split('T')[0];
 
             // Fetch today's targets
             const today = new Date().toISOString().split('T')[0];
             const targetsRes = await API.get('/targets/today');
 
             // Process targets to include day plan
-            const processedTargets = (targetsRes.data.result || []).map(target => {
-                // Get day plans
-                let dayPlans = [];
-                if (target.dayPlans) {
-                    if (typeof target.dayPlans === 'string') {
-                        try {
-                            dayPlans = JSON.parse(target.dayPlans);
-                        } catch (e) {
-                            dayPlans = [];
+            const processedTargets = (targetsRes.data.result || []).map(
+                (target) => {
+                    // Get day plans
+                    let dayPlans = [];
+                    if (target.dayPlans) {
+                        if (typeof target.dayPlans === 'string') {
+                            try {
+                                dayPlans = JSON.parse(target.dayPlans);
+                            } catch (e) {
+                                dayPlans = [];
+                            }
+                        } else if (Array.isArray(target.dayPlans)) {
+                            dayPlans = target.dayPlans;
                         }
-                    } else if (Array.isArray(target.dayPlans)) {
-                        dayPlans = target.dayPlans;
                     }
-                }
 
-                const todayPlan = dayPlans[(target.currentDay || 1) - 1] || {};
+                    const isCompletedToday = !!target.isCompletedToday;
+                    const displayDay = isCompletedToday
+                        ? Math.max((target.currentDay || 1) - 1, 1)
+                        : target.currentDay || 1;
+                    const todayPlan = dayPlans[displayDay - 1] || {};
 
-                return {
-                    ...target,
-                    type: 'target',
-                    dayPlan: todayPlan,
-                    isCompleted: target.isCompletedToday || false
-                };
-            });
+                    return {
+                        ...target,
+                        type: 'target',
+                        displayDay,
+                        dayPlan: todayPlan,
+                        isCompleted: isCompletedToday,
+                    };
+                },
+            );
 
             setTargetTasks(processedTargets);
 
             // Fetch manual tasks
             const tasksRes = await API.get('/tasks');
-            const todayTasks = (tasksRes.data.result || []).filter(task => {
+            const todayTasks = (tasksRes.data.result || []).filter((task) => {
                 if (!task.createdAt) return true; // Show all if no createdAt
-                const taskDate = new Date(task.createdAt).toISOString().split('T')[0];
+                const taskDate = new Date(task.createdAt)
+                    .toISOString()
+                    .split('T')[0];
                 return taskDate === today;
             });
 
@@ -328,7 +378,9 @@ const DailyScheduleScreen = () => {
 
                 // Then by deadline if available
                 if (a.deadline && b.deadline) {
-                    return parseTime(a.deadline) > parseTime(b.deadline) ? 1 : -1;
+                    return parseTime(a.deadline) > parseTime(b.deadline)
+                        ? 1
+                        : -1;
                 }
 
                 return 0;
@@ -336,11 +388,45 @@ const DailyScheduleScreen = () => {
 
             setSchedule(allTasks);
         } catch (err) {
-            console.log("[SCHEDULE FETCH ERROR]", err.message);
+            console.log('[SCHEDULE FETCH ERROR]', err.message);
         } finally {
             setLoading(false);
         }
     };
+
+    useEffect(() => {
+        let timerId;
+
+        const scheduleNextMidnightRefresh = () => {
+            const now = new Date();
+            const nextMidnight = new Date(now);
+            nextMidnight.setHours(24, 0, 2, 0);
+            const delay = Math.max(nextMidnight.getTime() - now.getTime(), 1000);
+
+            timerId = setTimeout(async () => {
+                await fetchTodaySchedule();
+                scheduleNextMidnightRefresh();
+            }, delay);
+        };
+
+        scheduleNextMidnightRefresh();
+
+        return () => {
+            if (timerId) clearTimeout(timerId);
+        };
+    }, []);
+
+    useEffect(() => {
+        const sub = AppState.addEventListener('change', (state) => {
+            if (state !== 'active') return;
+            const todayKey = new Date().toISOString().split('T')[0];
+            if (todayKey !== lastFetchedDateRef.current) {
+                fetchTodaySchedule();
+            }
+        });
+
+        return () => sub.remove();
+    }, []);
 
     const onRefresh = async () => {
         setRefreshing(true);
@@ -368,7 +454,7 @@ const DailyScheduleScreen = () => {
 
     const addTask = async () => {
         if (!newTaskTitle.trim()) {
-            alert("Please enter a task title");
+            alert('Please enter a task title');
             return;
         }
 
@@ -377,31 +463,32 @@ const DailyScheduleScreen = () => {
             deadline: selectedTime
                 ? `${selectedTime.getHours().toString().padStart(2, '0')}:${selectedTime.getMinutes().toString().padStart(2, '0')}:00`
                 : null,
-            isCompleted: false
+            isCompleted: false,
         };
 
         try {
             const res = await API.post('/tasks', newTask);
             const createdTask = res.data.result;
 
-            setManualTasks(prev => [...prev, createdTask]);
-            setSchedule(prev => [...prev, { ...createdTask, type: 'task' }]);
+            setManualTasks((prev) => [...prev, createdTask]);
+            setSchedule((prev) => [...prev, { ...createdTask, type: 'task' }]);
 
             setNewTaskTitle('');
             setSelectedTime(null);
             setAddTaskModalVisible(false);
 
-            alert("Task added successfully!");
+            alert('Task added successfully!');
         } catch (err) {
-            console.log("[ADD TASK ERROR]", err.message);
-            alert("Error adding task: " + err.message);
+            console.log('[ADD TASK ERROR]', err.message);
+            alert('Error adding task: ' + err.message);
         }
     };
 
     const handleCompleteTask = (taskId, type, isDelete = false) => {
-        const task = type === 'target'
-            ? targetTasks.find(t => t.id === taskId)
-            : manualTasks.find(t => t.id === taskId);
+        const task =
+            type === 'target'
+                ? targetTasks.find((t) => t.id === taskId)
+                : manualTasks.find((t) => t.id === taskId);
 
         if (!task) return;
 
@@ -425,22 +512,25 @@ const DailyScheduleScreen = () => {
         if (!selectedTask) return;
 
         try {
-            const res = await API.patch(`/targets/${selectedTask.id}/complete-day`, {
-                notes: taskNotes,
-                timeSpent: selectedTask.dailyMinutes || 30,
-            });
-
-            // Update local state
-            const updatedTargets = targetTasks.map(t =>
-                t.id === selectedTask.id
-                    ? { ...res.data.result, type: 'target', isCompleted: true }
-                    : t
+            const res = await API.patch(
+                `/targets/${selectedTask.id}/complete-day`,
+                {
+                    notes: taskNotes,
+                    timeSpent: selectedTask.dailyMinutes || 30,
+                },
             );
 
-            const updatedSchedule = schedule.map(item =>
+            // Update local state
+            const updatedTargets = targetTasks.map((t) =>
+                t.id === selectedTask.id
+                    ? { ...res.data.result, type: 'target', isCompleted: true }
+                    : t,
+            );
+
+            const updatedSchedule = schedule.map((item) =>
                 item.id === selectedTask.id && item.type === 'target'
                     ? { ...res.data.result, type: 'target', isCompleted: true }
-                    : item
+                    : item,
             );
 
             setTargetTasks(updatedTargets);
@@ -449,10 +539,10 @@ const DailyScheduleScreen = () => {
             setSelectedTask(null);
             setTaskNotes('');
 
-            alert("Great! Skill progress updated!");
+            alert('Great! Skill progress updated!');
         } catch (err) {
-            console.log("[COMPLETE TARGET ERROR]", err.message);
-            alert("Error completing task: " + err.message);
+            console.log('[COMPLETE TARGET ERROR]', err.message);
+            alert('Error completing task: ' + err.message);
         }
     };
 
@@ -461,14 +551,14 @@ const DailyScheduleScreen = () => {
             const res = await API.patch(`/targets/${targetId}/skip-day`);
 
             // Update local state
-            const updatedTargets = targetTasks.map(t =>
-                t.id === targetId ? { ...res.data.result, type: 'target' } : t
+            const updatedTargets = targetTasks.map((t) =>
+                t.id === targetId ? { ...res.data.result, type: 'target' } : t,
             );
 
-            const updatedSchedule = schedule.map(item =>
+            const updatedSchedule = schedule.map((item) =>
                 item.id === targetId && item.type === 'target'
                     ? { ...res.data.result, type: 'target' }
-                    : item
+                    : item,
             );
 
             setTargetTasks(updatedTargets);
@@ -476,8 +566,8 @@ const DailyScheduleScreen = () => {
 
             alert("Day skipped. Don't forget to catch up tomorrow!");
         } catch (err) {
-            console.log("[SKIP TARGET ERROR]", err.message);
-            alert("Error skipping day: " + err.message);
+            console.log('[SKIP TARGET ERROR]', err.message);
+            alert('Error skipping day: ' + err.message);
         }
     };
 
@@ -485,20 +575,20 @@ const DailyScheduleScreen = () => {
         try {
             const res = await API.patch(`/tasks/${taskId}/toggle`);
 
-            const updatedTasks = manualTasks.map(t =>
-                t.id === taskId ? res.data.result : t
+            const updatedTasks = manualTasks.map((t) =>
+                t.id === taskId ? res.data.result : t,
             );
 
-            const updatedSchedule = schedule.map(item =>
+            const updatedSchedule = schedule.map((item) =>
                 item.id === taskId && item.type === 'task'
                     ? { ...res.data.result, type: 'task' }
-                    : item
+                    : item,
             );
 
             setManualTasks(updatedTasks);
             setSchedule(updatedSchedule);
         } catch (err) {
-            console.log("[TOGGLE TASK ERROR]", err.message);
+            console.log('[TOGGLE TASK ERROR]', err.message);
         }
     };
 
@@ -506,19 +596,19 @@ const DailyScheduleScreen = () => {
         try {
             await API.delete(`/tasks/${taskId}`);
 
-            const updatedTasks = manualTasks.filter(t => t.id !== taskId);
-            const updatedSchedule = schedule.filter(item =>
-                !(item.id === taskId && item.type === 'task')
+            const updatedTasks = manualTasks.filter((t) => t.id !== taskId);
+            const updatedSchedule = schedule.filter(
+                (item) => !(item.id === taskId && item.type === 'task'),
             );
 
             setManualTasks(updatedTasks);
             setSchedule(updatedSchedule);
         } catch (err) {
-            console.log("[DELETE TASK ERROR]", err.message);
+            console.log('[DELETE TASK ERROR]', err.message);
         }
     };
 
-    const filteredSchedule = schedule.filter(item => {
+    const filteredSchedule = schedule.filter((item) => {
         if (activeTab === 'all') return true;
         if (activeTab === 'targets') return item.type === 'target';
         if (activeTab === 'tasks') return item.type === 'task';
@@ -529,28 +619,33 @@ const DailyScheduleScreen = () => {
         if (loading) {
             return (
                 <View style={emptyStyles.container}>
-                    <ActivityIndicator size="large" color="#4a90e2" />
-                    <Text style={emptyStyles.text}>Loading your schedule...</Text>
+                    <ActivityIndicator
+                        size='large'
+                        color='#4a90e2'
+                    />
+                    <Text style={emptyStyles.text}>
+                        Loading your schedule...
+                    </Text>
                 </View>
             );
         }
 
         const emptyStates = {
             all: {
-                emoji: "📅",
-                title: "Schedule empty",
-                text: "Add skills or tasks to plan your day"
+                emoji: '📅',
+                title: 'Schedule empty',
+                text: 'Add skills or tasks to plan your day',
             },
             targets: {
-                emoji: "🎯",
-                title: "No skill tasks today",
-                text: "Add skills in the Target tab to see them here"
+                emoji: '🎯',
+                title: 'No skill tasks today',
+                text: 'Add skills in the Target tab to see them here',
             },
             tasks: {
-                emoji: "📝",
-                title: "No manual tasks",
-                text: "Add tasks below to organize your day"
-            }
+                emoji: '📝',
+                title: 'No manual tasks',
+                text: 'Add tasks below to organize your day',
+            },
         };
 
         const currentEmpty = emptyStates[activeTab];
@@ -571,7 +666,10 @@ const DailyScheduleScreen = () => {
                         </TouchableOpacity>
                     )}
                     <TouchableOpacity
-                        style={[emptyStyles.button, { backgroundColor: '#28a745' }]}
+                        style={[
+                            emptyStyles.button,
+                            { backgroundColor: '#28a745' },
+                        ]}
                         onPress={fetchTodaySchedule}
                     >
                         <Text style={emptyStyles.buttonText}>Refresh</Text>
@@ -588,12 +686,12 @@ const DailyScheduleScreen = () => {
             keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
         >
             <View style={styles.header}>
-                <Text style={styles.headerTitle}>📅 Daily Schedule</Text>
+                <Text style={styles.headerTitle}> Daily Schedule</Text>
                 <Text style={styles.headerSubtitle}>
                     {new Date().toLocaleDateString('en-US', {
                         weekday: 'long',
                         month: 'long',
-                        day: 'numeric'
+                        day: 'numeric',
                     })}
                 </Text>
             </View>
@@ -605,30 +703,57 @@ const DailyScheduleScreen = () => {
             />
 
             <View style={styles.tabContainer}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                >
                     <TouchableOpacity
-                        style={[styles.tab, activeTab === 'all' && styles.activeTab]}
+                        style={[
+                            styles.tab,
+                            activeTab === 'all' && styles.activeTab,
+                        ]}
                         onPress={() => setActiveTab('all')}
                     >
-                        <Text style={[styles.tabText, activeTab === 'all' && styles.activeTabText]}>
+                        <Text
+                            style={[
+                                styles.tabText,
+                                activeTab === 'all' && styles.activeTabText,
+                            ]}
+                        >
                             All ({schedule.length})
                         </Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                        style={[styles.tab, activeTab === 'targets' && styles.activeTab]}
+                        style={[
+                            styles.tab,
+                            activeTab === 'targets' && styles.activeTab,
+                        ]}
                         onPress={() => setActiveTab('targets')}
                     >
-                        <Text style={[styles.tabText, activeTab === 'targets' && styles.activeTabText]}>
+                        <Text
+                            style={[
+                                styles.tabText,
+                                activeTab === 'targets' && styles.activeTabText,
+                            ]}
+                        >
                             Skills ({targetTasks.length})
                         </Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                        style={[styles.tab, activeTab === 'tasks' && styles.activeTab]}
+                        style={[
+                            styles.tab,
+                            activeTab === 'tasks' && styles.activeTab,
+                        ]}
                         onPress={() => setActiveTab('tasks')}
                     >
-                        <Text style={[styles.tabText, activeTab === 'tasks' && styles.activeTabText]}>
+                        <Text
+                            style={[
+                                styles.tabText,
+                                activeTab === 'tasks' && styles.activeTabText,
+                            ]}
+                        >
                             Tasks ({manualTasks.length})
                         </Text>
                     </TouchableOpacity>
@@ -652,7 +777,7 @@ const DailyScheduleScreen = () => {
                         refreshing={refreshing}
                         onRefresh={onRefresh}
                         colors={['#4a90e2']}
-                        tintColor="#4a90e2"
+                        tintColor='#4a90e2'
                     />
                 }
                 contentContainerStyle={{ paddingBottom: 100 }}
@@ -668,7 +793,7 @@ const DailyScheduleScreen = () => {
 
             {/* Add Task Modal */}
             <Modal
-                animationType="slide"
+                animationType='slide'
                 transparent={true}
                 visible={addTaskModalVisible}
                 onRequestClose={() => setAddTaskModalVisible(false)}
@@ -682,7 +807,7 @@ const DailyScheduleScreen = () => {
 
                         <TextInput
                             style={modalStyles.input}
-                            placeholder="Task title"
+                            placeholder='Task title'
                             value={newTaskTitle}
                             onChangeText={setNewTaskTitle}
                             autoFocus
@@ -692,19 +817,27 @@ const DailyScheduleScreen = () => {
                             style={modalStyles.timeButton}
                             onPress={() => setShowTimePicker(true)}
                         >
-                            <Text style={{ color: selectedTime ? '#000' : '#999' }}>
+                            <Text
+                                style={{
+                                    color: selectedTime ? '#000' : '#999',
+                                }}
+                            >
                                 {selectedTime
                                     ? `⏰ ${selectedTime.getHours().toString().padStart(2, '0')}:${selectedTime.getMinutes().toString().padStart(2, '0')}`
-                                    : "Add optional time (e.g., 8:40 PM)"}
+                                    : 'Add optional time (e.g., 8:40 PM)'}
                             </Text>
                         </TouchableOpacity>
 
                         {showTimePicker && (
                             <DateTimePicker
                                 value={selectedTime || new Date()}
-                                mode="time"
+                                mode='time'
                                 is24Hour={false}
-                                display={Platform.OS === "ios" ? "spinner" : "default"}
+                                display={
+                                    Platform.OS === 'ios'
+                                        ? 'spinner'
+                                        : 'default'
+                                }
                                 onChange={(event, date) => {
                                     setShowTimePicker(false);
                                     if (date) setSelectedTime(date);
@@ -714,18 +847,28 @@ const DailyScheduleScreen = () => {
 
                         <View style={modalStyles.buttonRow}>
                             <TouchableOpacity
-                                style={[modalStyles.button, modalStyles.cancelButton]}
+                                style={[
+                                    modalStyles.button,
+                                    modalStyles.cancelButton,
+                                ]}
                                 onPress={() => setAddTaskModalVisible(false)}
                             >
-                                <Text style={modalStyles.cancelButtonText}>Cancel</Text>
+                                <Text style={modalStyles.cancelButtonText}>
+                                    Cancel
+                                </Text>
                             </TouchableOpacity>
 
                             <TouchableOpacity
-                                style={[modalStyles.button, modalStyles.addButton]}
+                                style={[
+                                    modalStyles.button,
+                                    modalStyles.addButton,
+                                ]}
                                 onPress={addTask}
                                 disabled={!newTaskTitle.trim()}
                             >
-                                <Text style={modalStyles.addButtonText}>Add Task</Text>
+                                <Text style={modalStyles.addButtonText}>
+                                    Add Task
+                                </Text>
                             </TouchableOpacity>
                         </View>
                     </KeyboardAvoidingView>
@@ -734,27 +877,33 @@ const DailyScheduleScreen = () => {
 
             {/* Complete Target Modal */}
             <Modal
-                animationType="slide"
+                animationType='slide'
                 transparent={true}
                 visible={completeModalVisible}
                 onRequestClose={() => setCompleteModalVisible(false)}
             >
                 <View style={modalStyles.overlay}>
                     <View style={modalStyles.content}>
-                        <Text style={modalStyles.title}>✅ Complete Skill Task</Text>
+                        <Text style={modalStyles.title}>
+                            ✅ Complete Skill Task
+                        </Text>
 
                         {selectedTask && (
                             <>
                                 <Text style={modalStyles.taskName}>
-                                    {selectedTask.skillName || selectedTask.title}
+                                    {selectedTask.skillName ||
+                                        selectedTask.title}
                                 </Text>
                                 <Text style={modalStyles.taskInfo}>
-                                    Day {selectedTask.currentDay || 1} · {selectedTask.dailyMinutes || 30} minutes
+                                    Day {selectedTask.currentDay || 1} ·{' '}
+                                    {selectedTask.dailyMinutes || 30} minutes
                                 </Text>
 
                                 {selectedTask.dayPlan?.task && (
                                     <View style={modalStyles.planContainer}>
-                                        <Text style={modalStyles.planLabel}>Today's plan:</Text>
+                                        <Text style={modalStyles.planLabel}>
+                                            Today's plan:
+                                        </Text>
                                         <Text style={modalStyles.planText}>
                                             {selectedTask.dayPlan.task}
                                         </Text>
@@ -763,33 +912,43 @@ const DailyScheduleScreen = () => {
 
                                 <TextInput
                                     style={modalStyles.notesInput}
-                                    placeholder="What did you learn today? (optional)"
+                                    placeholder='What did you learn today? (optional)'
                                     value={taskNotes}
                                     onChangeText={setTaskNotes}
                                     multiline
                                     numberOfLines={3}
-                                    textAlignVertical="top"
+                                    textAlignVertical='top'
                                 />
                             </>
                         )}
 
                         <View style={modalStyles.buttonRow}>
                             <TouchableOpacity
-                                style={[modalStyles.button, modalStyles.cancelButton]}
+                                style={[
+                                    modalStyles.button,
+                                    modalStyles.cancelButton,
+                                ]}
                                 onPress={() => {
                                     setCompleteModalVisible(false);
                                     setSelectedTask(null);
                                     setTaskNotes('');
                                 }}
                             >
-                                <Text style={modalStyles.cancelButtonText}>Cancel</Text>
+                                <Text style={modalStyles.cancelButtonText}>
+                                    Cancel
+                                </Text>
                             </TouchableOpacity>
 
                             <TouchableOpacity
-                                style={[modalStyles.button, modalStyles.completeButton]}
+                                style={[
+                                    modalStyles.button,
+                                    modalStyles.completeButton,
+                                ]}
                                 onPress={confirmCompleteTarget}
                             >
-                                <Text style={modalStyles.completeButtonText}>Mark Complete</Text>
+                                <Text style={modalStyles.completeButtonText}>
+                                    Mark Complete
+                                </Text>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -804,97 +963,91 @@ const DailyScheduleScreen = () => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#f5f5f5',
+        backgroundColor: '#f4f6f8',
     },
     header: {
-        backgroundColor: '#fff',
-        paddingTop: 50,
-        paddingHorizontal: 20,
-        paddingBottom: 20,
-        borderBottomLeftRadius: 20,
-        borderBottomRightRadius: 20,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
-        marginBottom: 10,
+        backgroundColor: 'transparent',
+        paddingTop: 8,
+        paddingHorizontal: 16,
+        paddingBottom: 8,
+        marginBottom: 2,
     },
     headerTitle: {
-        fontSize: 28,
-        fontWeight: 'bold',
-        color: '#333',
-        marginBottom: 4,
+        fontSize: 26,
+        fontWeight: '700',
+        color: '#1f2937',
+        marginBottom: 2,
     },
     headerSubtitle: {
-        fontSize: 16,
-        color: '#666',
+        fontSize: 14,
+        color: '#6b7280',
     },
     tabContainer: {
-        paddingHorizontal: 20,
-        paddingVertical: 10,
-        backgroundColor: '#fff',
-        marginBottom: 10,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        marginBottom: 8,
     },
     tab: {
-        paddingHorizontal: 20,
-        paddingVertical: 10,
-        marginRight: 10,
-        borderRadius: 20,
-        backgroundColor: '#f0f0f0',
+        paddingHorizontal: 16,
+        paddingVertical: 9,
+        marginRight: 8,
+        borderRadius: 18,
+        backgroundColor: '#ffffff',
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
     },
     activeTab: {
-        backgroundColor: '#4a90e2',
+        backgroundColor: '#1d4ed8',
+        borderColor: '#1d4ed8',
     },
     tabText: {
-        color: '#666',
+        color: '#4b5563',
         fontWeight: '600',
+        fontSize: 13,
     },
     activeTabText: {
         color: '#fff',
     },
     fab: {
         position: 'absolute',
-        right: 20,
-        bottom: 30,
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        backgroundColor: '#4a90e2',
+        right: 16,
+        bottom: 24,
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        backgroundColor: '#1d4ed8',
         alignItems: 'center',
         justifyContent: 'center',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 6,
+        shadowOpacity: 0.2,
+        shadowRadius: 5,
+        elevation: 5,
     },
     fabText: {
         color: '#fff',
-        fontSize: 30,
-        fontWeight: 'bold',
+        fontSize: 28,
+        fontWeight: '700',
     },
 });
 
 const scheduleStyles = StyleSheet.create({
     item: {
         backgroundColor: '#fff',
-        marginHorizontal: 20,
-        marginVertical: 6,
-        padding: 16,
-        borderRadius: 12,
+        marginHorizontal: 16,
+        marginVertical: 5,
+        padding: 14,
+        borderRadius: 14,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 2,
-        elevation: 1,
+        borderWidth: 1,
+        borderColor: '#e8edf3',
     },
     itemCompleted: {
-        opacity: 0.7,
-        backgroundColor: '#f8f9fa',
+        opacity: 0.85,
+        backgroundColor: '#f8fbff',
+        borderColor: '#dbeafe',
     },
     itemLeft: {
         flexDirection: 'row',
@@ -907,15 +1060,15 @@ const scheduleStyles = StyleSheet.create({
     checkbox: {
         width: 24,
         height: 24,
-        borderRadius: 4,
-        borderWidth: 2,
-        borderColor: '#4a90e2',
+        borderRadius: 6,
+        borderWidth: 1.8,
+        borderColor: '#1d4ed8',
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: '#fff',
     },
     checkboxChecked: {
-        backgroundColor: '#4a90e2',
+        backgroundColor: '#1d4ed8',
     },
     checkMark: {
         color: '#fff',
@@ -929,12 +1082,12 @@ const scheduleStyles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        marginBottom: 4,
+        marginBottom: 6,
     },
     title: {
-        fontSize: 16,
+        fontSize: 15,
         fontWeight: '600',
-        color: '#333',
+        color: '#111827',
         flex: 1,
     },
     titleCompleted: {
@@ -942,15 +1095,15 @@ const scheduleStyles = StyleSheet.create({
         color: '#999',
     },
     typeBadge: {
-        backgroundColor: '#e7f3ff',
+        backgroundColor: '#eff6ff',
         paddingHorizontal: 8,
         paddingVertical: 2,
-        borderRadius: 4,
+        borderRadius: 6,
         marginLeft: 8,
     },
     typeText: {
-        fontSize: 11,
-        color: '#4a90e2',
+        fontSize: 10,
+        color: '#1d4ed8',
         fontWeight: '600',
     },
     targetInfo: {
@@ -958,7 +1111,7 @@ const scheduleStyles = StyleSheet.create({
     },
     dayInfo: {
         fontSize: 13,
-        color: '#666',
+        color: '#6b7280',
     },
     dayTask: {
         fontSize: 13,
@@ -966,32 +1119,32 @@ const scheduleStyles = StyleSheet.create({
         fontStyle: 'italic',
     },
     deadline: {
-        fontSize: 12,
+        fontSize: 11,
         marginTop: 2,
         fontStyle: 'italic',
     },
     timeBadge: {
-        backgroundColor: '#e8f5e8',
+        backgroundColor: '#ecfdf5',
         alignSelf: 'flex-start',
         paddingHorizontal: 8,
         paddingVertical: 2,
-        borderRadius: 4,
+        borderRadius: 6,
         marginTop: 4,
     },
     timeText: {
         fontSize: 11,
-        color: '#28a745',
+        color: '#059669',
         fontWeight: '600',
     },
     skipButton: {
-        backgroundColor: '#f8f9fa',
+        backgroundColor: '#f3f4f6',
         paddingHorizontal: 12,
         paddingVertical: 6,
-        borderRadius: 6,
+        borderRadius: 8,
         marginLeft: 8,
     },
     skipText: {
-        color: '#6c757d',
+        color: '#374151',
         fontSize: 12,
         fontWeight: '600',
     },
@@ -1009,15 +1162,12 @@ const scheduleStyles = StyleSheet.create({
 const statsStyles = StyleSheet.create({
     container: {
         backgroundColor: '#fff',
-        marginHorizontal: 20,
-        marginVertical: 10,
-        padding: 20,
-        borderRadius: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        marginHorizontal: 16,
+        marginVertical: 8,
+        padding: 16,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: '#e8edf3',
     },
     header: {
         flexDirection: 'row',
@@ -1026,9 +1176,9 @@ const statsStyles = StyleSheet.create({
         marginBottom: 16,
     },
     headerTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: '#333',
+        fontSize: 17,
+        fontWeight: '700',
+        color: '#111827',
     },
     refreshButton: {
         padding: 8,
@@ -1040,20 +1190,20 @@ const statsStyles = StyleSheet.create({
         marginBottom: 20,
     },
     progressBar: {
-        height: 8,
-        backgroundColor: '#e9ecef',
+        height: 9,
+        backgroundColor: '#e5e7eb',
         borderRadius: 4,
         overflow: 'hidden',
         marginBottom: 8,
     },
     progressFill: {
         height: '100%',
-        backgroundColor: '#4a90e2',
+        backgroundColor: '#1d4ed8',
         borderRadius: 4,
     },
     progressText: {
-        fontSize: 14,
-        color: '#666',
+        fontSize: 13,
+        color: '#4b5563',
         textAlign: 'center',
     },
     statsGrid: {
@@ -1065,14 +1215,14 @@ const statsStyles = StyleSheet.create({
         flex: 1,
     },
     statNumber: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: '#4a90e2',
+        fontSize: 17,
+        fontWeight: '700',
+        color: '#1d4ed8',
         marginBottom: 4,
     },
     statLabel: {
-        fontSize: 12,
-        color: '#666',
+        fontSize: 11,
+        color: '#6b7280',
     },
 });
 
@@ -1081,23 +1231,23 @@ const emptyStyles = StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 40,
-        marginTop: 50,
+        padding: 32,
+        marginTop: 40,
     },
     emoji: {
         fontSize: 64,
         marginBottom: 16,
     },
     title: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: '#333',
+        fontSize: 19,
+        fontWeight: '700',
+        color: '#1f2937',
         marginBottom: 8,
         textAlign: 'center',
     },
     text: {
-        fontSize: 14,
-        color: '#666',
+        fontSize: 13,
+        color: '#6b7280',
         textAlign: 'center',
         marginBottom: 24,
         lineHeight: 20,
@@ -1107,10 +1257,10 @@ const emptyStyles = StyleSheet.create({
         justifyContent: 'center',
     },
     button: {
-        backgroundColor: '#4a90e2',
-        paddingHorizontal: 20,
-        paddingVertical: 12,
-        borderRadius: 8,
+        backgroundColor: '#1d4ed8',
+        paddingHorizontal: 18,
+        paddingVertical: 11,
+        borderRadius: 10,
         alignItems: 'center',
     },
     buttonText: {
@@ -1123,39 +1273,41 @@ const emptyStyles = StyleSheet.create({
 const modalStyles = StyleSheet.create({
     overlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        backgroundColor: 'rgba(15, 23, 42, 0.45)',
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 20,
+        padding: 16,
     },
     content: {
         backgroundColor: '#fff',
-        borderRadius: 16,
-        padding: 24,
+        borderRadius: 18,
+        padding: 20,
         width: '100%',
-        maxWidth: 400,
+        maxWidth: 420,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
     },
     title: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: '#333',
-        marginBottom: 20,
+        fontSize: 19,
+        fontWeight: '700',
+        color: '#111827',
+        marginBottom: 16,
         textAlign: 'center',
     },
     input: {
         borderWidth: 1,
-        borderColor: '#ddd',
-        padding: 14,
-        borderRadius: 8,
+        borderColor: '#d1d5db',
+        padding: 12,
+        borderRadius: 10,
         fontSize: 16,
         marginBottom: 12,
     },
     timeButton: {
         borderWidth: 1,
-        borderColor: '#ddd',
-        padding: 14,
-        borderRadius: 8,
-        marginBottom: 20,
+        borderColor: '#d1d5db',
+        padding: 12,
+        borderRadius: 10,
+        marginBottom: 16,
     },
     buttonRow: {
         flexDirection: 'row',
@@ -1169,21 +1321,21 @@ const modalStyles = StyleSheet.create({
         alignItems: 'center',
     },
     cancelButton: {
-        backgroundColor: '#f0f0f0',
+        backgroundColor: '#e5e7eb',
     },
     cancelButtonText: {
-        color: '#666',
+        color: '#374151',
         fontWeight: '600',
     },
     addButton: {
-        backgroundColor: '#28a745',
+        backgroundColor: '#1d4ed8',
     },
     addButtonText: {
         color: '#fff',
         fontWeight: '600',
     },
     completeButton: {
-        backgroundColor: '#28a745',
+        backgroundColor: '#1d4ed8',
     },
     completeButtonText: {
         color: '#fff',
@@ -1191,27 +1343,27 @@ const modalStyles = StyleSheet.create({
     },
     taskName: {
         fontSize: 18,
-        fontWeight: 'bold',
-        color: '#333',
+        fontWeight: '700',
+        color: '#111827',
         marginBottom: 8,
         textAlign: 'center',
     },
     taskInfo: {
-        fontSize: 14,
-        color: '#666',
+        fontSize: 13,
+        color: '#6b7280',
         textAlign: 'center',
         marginBottom: 16,
     },
     planContainer: {
-        backgroundColor: '#f8f9fa',
+        backgroundColor: '#f3f4f6',
         padding: 12,
-        borderRadius: 8,
+        borderRadius: 10,
         marginBottom: 16,
     },
     planLabel: {
         fontSize: 12,
         fontWeight: '600',
-        color: '#28a745',
+        color: '#1d4ed8',
         marginBottom: 4,
     },
     planText: {
