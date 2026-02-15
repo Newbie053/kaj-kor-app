@@ -1,4 +1,5 @@
 require('dotenv').config();
+const pg = require('pg');
 const isNeonHost = String(process.env.DB_HOST || '').includes('neon.tech');
 
 const sharedConfig = {
@@ -8,6 +9,7 @@ const sharedConfig = {
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT || 5432),
   dialect: 'postgres',
+  dialectModule: pg,
   logging: false,
   dialectOptions: isNeonHost
     ? {
