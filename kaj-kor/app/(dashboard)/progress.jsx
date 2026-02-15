@@ -1,273 +1,527 @@
-// kaj-kor/app/(dashboard)/progress.jsx
-import React from "react"
+import React from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
-  Dimensions,
-} from "react-native"
-import axios from "axios"
-import { ProgressChart } from "react-native-chart-kit"
-import AsyncStorage from "@react-native-async-storage/async-storage"
-
+  TouchableOpacity,
+  Modal,
+  FlatList,
+  RefreshControl,
+} from "react-native";
+import axios from "axios";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "expo-router";
+import { API_BASE_URL } from "../constants/api";
 
 const API = axios.create({
-  baseURL: "http://192.168.10.116:5000",
-})
+  baseURL: API_BASE_URL,
+});
 
 API.interceptors.request.use(async (config) => {
-  const token = await AsyncStorage.getItem("token")
+  const token = await AsyncStorage.getItem("token");
   if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+    config.headers.Authorization = `Bearer ${token}`;
   }
-  return config
-})
+  return config;
+});
 
 
-const screenWidth = Dimensions.get("window").width
+const parseDeadline = (deadline) => {
+  if (!deadline) return null;
+  const parsed = new Date(deadline);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
+const formatDate = (value) => {
+  if (!value) return "No deadline";
+  return value.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+const clampPct = (value) => Math.max(0, Math.min(100, Math.round(value)));
+
+const getStatusLabel = (target, now) => {
+  if (target.isCompleted) return "Completed";
+  if (target.deadlineDate && target.deadlineDate < now) return "Missed";
+  if (target.deadlineDate && target.deadlineDate >= now) return "Due";
+  return "In progress";
+};
+
+const getFilterTitle = (key) => {
+  if (key === "total") return "All Targets";
+  if (key === "completed") return "Completed Targets";
+  if (key === "due") return "Due Targets";
+  return "Missed Targets";
+};
 
 export default function ProgressScreen() {
-  const now = new Date()
-  const [targets, setTargets] = React.useState([])
+  const [targets, setTargets] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [activeFilter, setActiveFilter] = React.useState(null);
+  const [detailsVisible, setDetailsVisible] = React.useState(false);
 
-  React.useEffect(() => {
-    const fetchProgress = async () => {
-      try {
-const res = await API.get("/progress")
-setTargets(res.data.result || [])
+  const now = React.useMemo(() => new Date(), [refreshing, loading]);
 
-      } catch (err) {
-        console.log("[PROGRESS FETCH ERROR]", err.message)
-      }
+  const fetchProgress = React.useCallback(async () => {
+    try {
+      const res = await API.get("/progress");
+      setTargets(res.data.result || []);
+    } catch (err) {
+      console.log("[PROGRESS FETCH ERROR]", err.response?.data || err.message);
     }
+  }, []);
 
-    fetchProgress()
-  }, [])
+  useFocusEffect(
+    React.useCallback(() => {
+      let isMounted = true;
+      const load = async () => {
+        if (isMounted) setLoading(true);
+        await fetchProgress();
+        if (isMounted) setLoading(false);
+      };
+      load();
+      return () => {
+        isMounted = false;
+      };
+    }, [fetchProgress])
+  );
 
-  // 1️⃣ Normalize
-  const normalizeTargets = targets.map((t) => ({
-    ...t,
-    deadline: t.deadline ? new Date(t.deadline) : null,
-  }))
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchProgress();
+    setRefreshing(false);
+  };
 
-  // 2️⃣ Metrics
-  const totalTargets = normalizeTargets.length
+  const normalizedTargets = React.useMemo(
+    () =>
+      targets.map((target) => {
+        const total = Number(target.total || target.totalDays || 0);
+        const completed = Number(target.completed || 0);
+        const progressPct = total > 0 ? clampPct((completed / total) * 100) : 0;
+        const deadlineDate = parseDeadline(target.deadline);
 
-  const totalUnits = normalizeTargets.reduce(
-    (sum, t) => sum + (t.total || 0),
-    0
-  )
+        return {
+          ...target,
+          total,
+          completed,
+          progressPct,
+          deadlineDate,
+          isCompleted: total > 0 ? completed >= total : false,
+        };
+      }),
+    [targets]
+  );
 
-  const completedUnits = normalizeTargets.reduce(
-    (sum, t) => sum + (t.completed || 0),
-    0
-  )
+  const totalTargetsList = normalizedTargets;
+  const completedTargetsList = normalizedTargets.filter((t) => t.isCompleted);
+  const dueTargetsList = normalizedTargets.filter(
+    (t) => !t.isCompleted && t.deadlineDate && t.deadlineDate >= now
+  );
+  const missedTargetsList = normalizedTargets.filter(
+    (t) => !t.isCompleted && t.deadlineDate && t.deadlineDate < now
+  );
 
-  const completedTargets = normalizeTargets.filter(
-    (t) => t.completed >= t.total
-  ).length
+  const totalTargets = totalTargetsList.length;
+  const completedTargets = completedTargetsList.length;
+  const dueTargets = dueTargetsList.length;
+  const missedTargets = missedTargetsList.length;
 
-  const dueTargets = normalizeTargets.filter(
-    (t) => t.deadline && t.deadline > now
-  ).length
-
-  const missedDeadlines = normalizeTargets.filter(
-    (t) => t.deadline && t.deadline < now && t.completed < t.total
-  ).length
-
+  const totalUnits = normalizedTargets.reduce((sum, t) => sum + t.total, 0);
+  const completedUnits = normalizedTargets.reduce((sum, t) => sum + t.completed, 0);
   const completionRate =
-    totalUnits === 0
-      ? 0
-      : Math.round((completedUnits / totalUnits) * 100)
+    totalUnits === 0 ? 0 : clampPct((completedUnits / totalUnits) * 100);
 
-  // Learning speed
-  const firstStartDate = normalizeTargets
-    .map((t) => t.deadline)
+  const trackedSince = normalizedTargets
+    .map((t) => t.createdAt ? new Date(t.createdAt) : null)
     .filter(Boolean)
-    .sort()[0]
+    .sort((a, b) => a - b)[0];
 
-  const daysPassed = firstStartDate
-    ? Math.max(
-        1,
-        Math.floor(
-          (now - new Date(firstStartDate)) /
-            (1000 * 60 * 60 * 24)
-        )
-      )
-    : 1
+  const daysTracked = trackedSince
+    ? Math.max(1, Math.floor((now - trackedSince) / (1000 * 60 * 60 * 24)))
+    : 1;
 
-  const learningSpeed = Math.round(completedUnits / daysPassed)
+  const averageUnitsPerDay =
+    daysTracked > 0 ? (completedUnits / daysTracked).toFixed(1) : "0.0";
+
+  const detailItems = React.useMemo(() => {
+    if (activeFilter === "completed") return completedTargetsList;
+    if (activeFilter === "due") return dueTargetsList;
+    if (activeFilter === "missed") return missedTargetsList;
+    return totalTargetsList;
+  }, [
+    activeFilter,
+    totalTargetsList,
+    completedTargetsList,
+    dueTargetsList,
+    missedTargetsList,
+  ]);
+
+  const openDetails = (filterKey) => {
+    setActiveFilter(filterKey);
+    setDetailsVisible(true);
+  };
+
+  const closeDetails = () => {
+    setDetailsVisible(false);
+    setActiveFilter(null);
+  };
 
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.title}>Progress Dashboard</Text>
-      <Text style={styles.subtitle}>Your learning performance at a glance</Text>
+    <View style={styles.container}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={["#4a90e2"]}
+            tintColor="#4a90e2"
+          />
+        }
+      >
+        <Text style={styles.title}>Progress</Text>
+        <Text style={styles.subtitle}>
+          Clear overview of your active targets and completion trend.
+        </Text>
 
-      {/* Completion Chart */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Overall Completion</Text>
+        <View style={styles.heroCard}>
+          <View style={styles.heroHeader}>
+            <Text style={styles.heroTitle}>Overall Completion</Text>
+            <Text style={styles.heroValue}>{completionRate}%</Text>
+          </View>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${completionRate}%` }]} />
+          </View>
 
-        <ProgressChart
-          data={{
-            labels: ["Completed"],
-            data: [completionRate / 100],
-          }}
-          width={screenWidth - 40}
-          height={180}
-          strokeWidth={12}
-          radius={48}
-          chartConfig={{
-            backgroundGradientFrom: "#fff",
-            backgroundGradientTo: "#fff",
-            color: (opacity = 1) =>
-              `rgba(76, 175, 80, ${opacity})`,
-          }}
-          hideLegend
-        />
+          <View style={styles.heroMetaRow}>
+            <Text style={styles.heroMetaText}>Units: {completedUnits}/{totalUnits}</Text>
+            <Text style={styles.heroMetaText}>Avg/day: {averageUnitsPerDay}</Text>
+          </View>
+        </View>
 
-        <Text style={styles.bigNumber}>{completionRate}%</Text>
-      </View>
+        <View style={styles.grid}>
+          <KPI
+            label="Total Targets"
+            value={totalTargets}
+            onPress={() => openDetails("total")}
+          />
+          <KPI
+            label="Completed"
+            value={completedTargets}
+            onPress={() => openDetails("completed")}
+          />
+          <KPI label="Due" value={dueTargets} onPress={() => openDetails("due")} />
+          <KPI
+            label="Missed"
+            value={missedTargets}
+            onPress={() => openDetails("missed")}
+          />
+        </View>
 
-      {/* KPI Cards */}
-      <View style={styles.grid}>
-        <KPI label="Total Targets" value={totalTargets} />
-        <KPI label="Completed" value={completedTargets} />
-        <KPI label="Due" value={dueTargets} />
-        <KPI label="Missed" value={missedDeadlines} />
-      </View>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Performance Snapshot</Text>
+          <MetricRow label="Tracking Days" value={daysTracked} />
+          <MetricRow label="Total Units Planned" value={totalUnits} />
+          <MetricRow label="Units Completed" value={completedUnits} />
+          <MetricRow label="Average Units/Day" value={averageUnitsPerDay} />
+        </View>
 
-      {/* Units */}
-      <View style={styles.card}>
-        <Stat label="Total Units Planned" value={totalUnits} />
-        <Stat label="Units Completed" value={completedUnits} />
-        <Stat label="Learning Speed" value={`${learningSpeed} units/day`} />
-      </View>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Active Learning</Text>
+          {loading ? (
+            <Text style={styles.muted}>Loading targets...</Text>
+          ) : normalizedTargets.length === 0 ? (
+            <Text style={styles.muted}>No targets yet.</Text>
+          ) : (
+            normalizedTargets.slice(0, 5).map((target) => (
+              <View key={target.id} style={styles.inlineItem}>
+                <Text style={styles.inlineTitle} numberOfLines={1}>
+                  {target.skillName || target.title}
+                </Text>
+                <Text style={styles.inlineMeta}>
+                  {target.completed}/{target.total} ({target.progressPct}%) - {getStatusLabel(target, now)}
+                </Text>
+              </View>
+            ))
+          )}
+        </View>
+      </ScrollView>
 
-      {/* Learning List */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>What I’m Learning</Text>
-        {targets.length === 0 ? (
-          <Text style={styles.muted}>No targets yet.</Text>
-        ) : (
-          targets.map((t) => (
-            <Text key={t.id} style={styles.item}>
-              • {t.title} ({t.type})
-            </Text>
-          ))
-        )}
-      </View>
-    </ScrollView>
-  )
+      <Modal
+        visible={detailsVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={closeDetails}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{getFilterTitle(activeFilter)}</Text>
+              <TouchableOpacity onPress={closeDetails}>
+                <Text style={styles.closeText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+
+            <FlatList
+              data={detailItems}
+              keyExtractor={(item) => String(item.id)}
+              showsVerticalScrollIndicator={false}
+              ListEmptyComponent={
+                <Text style={styles.muted}>No targets in this category.</Text>
+              }
+              renderItem={({ item }) => (
+                <View style={styles.detailItem}>
+                  <View style={styles.detailTopRow}>
+                    <Text style={styles.detailTitle} numberOfLines={1}>
+                      {item.skillName || item.title}
+                    </Text>
+                    <Text style={styles.statusTag}>{getStatusLabel(item, now)}</Text>
+                  </View>
+                  <Text style={styles.detailMeta}>
+                    Type: {item.type || "Target"}
+                  </Text>
+                  <Text style={styles.detailMeta}>
+                    Progress: {item.completed}/{item.total} ({item.progressPct}%)
+                  </Text>
+                  <Text style={styles.detailMeta}>
+                    Deadline: {formatDate(item.deadlineDate)}
+                  </Text>
+                </View>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
 }
 
-/* ---------- Components ---------- */
-
-const KPI = ({ label, value }) => (
-  <View style={styles.kpiCard}>
+const KPI = ({ label, value, onPress }) => (
+  <TouchableOpacity style={styles.kpiCard} activeOpacity={0.8} onPress={onPress}>
     <Text style={styles.kpiValue}>{value}</Text>
     <Text style={styles.kpiLabel}>{label}</Text>
-  </View>
-)
+    <Text style={styles.kpiHint}>Tap for details</Text>
+  </TouchableOpacity>
+);
 
-const Stat = ({ label, value }) => (
-  <View style={styles.statRow}>
-    <Text style={styles.label}>{label}</Text>
-    <Text style={styles.value}>{value}</Text>
+const MetricRow = ({ label, value }) => (
+  <View style={styles.metricRow}>
+    <Text style={styles.metricLabel}>{label}</Text>
+    <Text style={styles.metricValue}>{value}</Text>
   </View>
-)
-
-/* ---------- Styles ---------- */
+);
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
     backgroundColor: "#f4f6f8",
+    paddingHorizontal: 16,
+    paddingTop: 14,
   },
-
   title: {
     fontSize: 26,
-    fontWeight: "bold",
+    fontWeight: "700",
+    color: "#222",
     marginBottom: 4,
   },
-
   subtitle: {
-    color: "#777",
-    marginBottom: 20,
+    fontSize: 13,
+    color: "#667085",
+    marginBottom: 14,
   },
-
-  card: {
+  heroCard: {
     backgroundColor: "#fff",
-    borderRadius: 16,
+    borderRadius: 14,
     padding: 16,
-    marginBottom: 20,
-    elevation: 3,
+    marginBottom: 14,
+    elevation: 2,
   },
-
-  cardTitle: {
-    fontSize: 16,
+  heroHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  heroTitle: {
+    fontSize: 15,
     fontWeight: "600",
-    marginBottom: 10,
+    color: "#222",
   },
-
-  bigNumber: {
-    textAlign: "center",
-    fontSize: 28,
-    fontWeight: "bold",
-    marginTop: -10,
-    color: "#4CAF50",
+  heroValue: {
+    fontSize: 26,
+    fontWeight: "700",
+    color: "#4a90e2",
   },
-
+  heroMetaRow: {
+    marginTop: 6,
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  progressTrack: {
+    height: 12,
+    backgroundColor: "#eaf0f6",
+    borderRadius: 10,
+    overflow: "hidden",
+    marginTop: 12,
+    marginBottom: 2,
+  },
+  progressFill: {
+    height: "100%",
+    backgroundColor: "#4a90e2",
+    borderRadius: 10,
+  },
+  heroMetaText: {
+    fontSize: 12,
+    color: "#667085",
+    fontWeight: "500",
+  },
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "space-between",
-    marginBottom: 10,
+    marginBottom: 6,
   },
-
   kpiCard: {
     width: "48%",
     backgroundColor: "#fff",
-    padding: 16,
-    borderRadius: 14,
-    marginBottom: 12,
-    elevation: 2,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    elevation: 1,
   },
-
   kpiValue: {
     fontSize: 22,
-    fontWeight: "bold",
+    fontWeight: "700",
+    color: "#1d2939",
   },
-
   kpiLabel: {
     fontSize: 13,
-    color: "#777",
+    color: "#475467",
     marginTop: 4,
+    fontWeight: "600",
   },
-
-  statRow: {
+  kpiHint: {
+    fontSize: 11,
+    color: "#98a2b3",
+    marginTop: 6,
+  },
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    elevation: 1,
+  },
+  cardTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#222",
+    marginBottom: 10,
+  },
+  metricRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f2f4f7",
   },
-
-  label: {
-    fontSize: 14,
-    color: "#555",
+  metricLabel: {
+    fontSize: 13,
+    color: "#475467",
   },
-
-  value: {
-    fontSize: 14,
-    fontWeight: "bold",
+  metricValue: {
+    fontSize: 13,
+    color: "#1d2939",
+    fontWeight: "700",
   },
-
-  item: {
+  inlineItem: {
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f2f4f7",
+  },
+  inlineTitle: {
     fontSize: 14,
+    fontWeight: "600",
+    color: "#1d2939",
+    marginBottom: 3,
+  },
+  inlineMeta: {
+    fontSize: 12,
+    color: "#667085",
+  },
+  muted: {
+    color: "#98a2b3",
+    fontSize: 13,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.35)",
+    justifyContent: "flex-end",
+  },
+  modalCard: {
+    height: "78%",
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 18,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#1d2939",
+  },
+  closeText: {
+    color: "#4a90e2",
+    fontWeight: "600",
+    fontSize: 14,
+  },
+  detailItem: {
+    borderWidth: 1,
+    borderColor: "#eaecf0",
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10,
+    backgroundColor: "#fff",
+  },
+  detailTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 6,
   },
-
-  muted: {
-    color: "#999",
+  detailTitle: {
+    flex: 1,
+    marginRight: 10,
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#1d2939",
   },
-})
+  statusTag: {
+    fontSize: 11,
+    color: "#344054",
+    backgroundColor: "#f2f4f7",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  detailMeta: {
+    fontSize: 12,
+    color: "#667085",
+    marginBottom: 2,
+  },
+});

@@ -36,7 +36,10 @@ db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 
 // Sync DB
-sequelize.sync().then(() => console.log('✅ DB synced'));
+sequelize
+  .authenticate()
+  .then(() => console.log('✅ DB connected'))
+  .catch((err) => console.error('❌ DB connection error:', err.message));
 // in your main Sequelize sync file
 // sequelize.sync({ force: true },
 //    console.log('✅ DB synced with force true')

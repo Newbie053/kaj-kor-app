@@ -7,6 +7,18 @@ module.exports = (sequelize, DataTypes) => {
     total: { type: DataTypes.INTEGER, defaultValue: 0 },
     completed: { type: DataTypes.INTEGER, defaultValue: 0 },
     deadline: { type: DataTypes.DATE },
+    skillName: { type: DataTypes.STRING },
+    totalDays: { type: DataTypes.INTEGER },
+    dailyMinutes: { type: DataTypes.INTEGER, defaultValue: 30 },
+    currentDay: { type: DataTypes.INTEGER, defaultValue: 1 },
+    streak: { type: DataTypes.INTEGER, defaultValue: 0 },
+    lastCompleted: { type: DataTypes.DATE },
+    dailyLogs: { type: DataTypes.JSON, defaultValue: [] },
+    milestones: { type: DataTypes.JSON, defaultValue: [] },
+        dayPlans: {
+      type: DataTypes.JSON,
+      defaultValue: []
+    }
   });
 
   Target.associate = (models) => {

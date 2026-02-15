@@ -1,12 +1,11 @@
 // kaj-kor/app/(dashboard)/index.jsx
 
-import React, { useState, useEffect } from 'react';
-import axios from 'axios'
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
-
-
-
+import { useFocusEffect } from 'expo-router';
+import { API_BASE_URL } from '../constants/api';
 import {
     View,
     Text,
@@ -15,59 +14,430 @@ import {
     TextInput,
     FlatList,
     KeyboardAvoidingView,
-    Platform
+    Platform,
+    ScrollView,
+    RefreshControl,
+    Modal,
+    ActivityIndicator,
+    Alert, // <-- ADD THIS IMPORT
+    AppState,
 } from 'react-native';
 
 const API = axios.create({
-  baseURL: 'http://192.168.10.116:5000'
-
-})
-
-API.interceptors.request.use(async (config) => {
-  try {
-    const token = await AsyncStorage.getItem("token"); // get token safely
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-  } catch (err) {
-    console.log("[TOKEN ERROR]", err);
-  }
-  return config;
+    baseURL: API_BASE_URL,
 });
 
+API.interceptors.request.use(async (config) => {
+    try {
+        const token = await AsyncStorage.getItem('token');
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
+        }
+    } catch (err) {
+        console.log('[TOKEN ERROR]', err);
+    }
+    return config;
+});
 
+// ========== COMPONENTS ==========
 
+// Schedule Item Component
+const ScheduleItem = ({ item, onComplete, onSkip, type }) => {
+    const isTargetTask = type === 'target';
+    const displayDay = item.displayDay || item.currentDay || 1;
 
-function parseTime(input) {
-  if (!input) return null;
-  const match = input.match(/(\d{1,2}):(\d{2})\s?(AM|PM)?/i);
-  if (!match) return null;
+    const getTimeInfo = () => {
+        if (!item.deadline && !isTargetTask) return null;
 
-  let [, hour, minute, period] = match;
-  hour = parseInt(hour);
-  minute = parseInt(minute);
+        if (isTargetTask) {
+            return {
+                time: `${item.dailyMinutes || 30}m`,
+                color: '#4a90e2',
+                icon: '🎯',
+            };
+        }
 
-  if (period) {
-    period = period.toUpperCase();
-    if (period === 'PM' && hour < 12) hour += 12;
-    if (period === 'AM' && hour === 12) hour = 0;
-  }
+        // For manual todos
+        const calculateRemainingTime = () => {
+            if (!item.deadline) return null;
 
-  return `${hour.toString().padStart(2,'0')}:${minute.toString().padStart(2,'0')}:00`;
-}
+            const match = item.deadline.match(/(\d{1,2}):(\d{2})\s?(AM|PM)?/i);
+            if (!match) return null;
 
+            let [, hour, minute, period] = match;
+            hour = parseInt(hour);
+            minute = parseInt(minute);
 
-// A simple component for rendering an individual Todo item
-const TodoItem = ({ task, onDelete, onToggle }) => {
-    const [remainingTime, setRemainingTime] = useState("");
+            if (period) {
+                period = period.toUpperCase();
+                if (period === 'PM' && hour < 12) hour += 12;
+                if (period === 'AM' && hour === 12) hour = 0;
+            }
 
-    const calculateRemainingTime = () => {
-        if (!task.deadline) return "";
+            const now = new Date();
+            const deadline = new Date();
+            deadline.setHours(hour, minute, 0, 0);
 
-        const now = new Date();
+            const diff = deadline - now;
+            if (diff <= 0) return { text: "⏰ Time's up", color: '#dc3545' };
 
-        const match = task.deadline.match(/(\d{1,2}):(\d{2})\s?(AM|PM)?/i);
-        if (!match) return "";
+            const h = Math.floor(diff / (1000 * 60 * 60));
+            const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+            if (h > 0) {
+                return { text: `${h}h ${m}m left`, color: '#28a745' };
+            } else if (m > 30) {
+                return { text: `${m}m left`, color: '#ffc107' };
+            } else {
+                return { text: `${m}m left`, color: '#fd7e14' };
+            }
+        };
+
+        const timeInfo = calculateRemainingTime();
+        return timeInfo;
+    };
+
+    const timeInfo = getTimeInfo();
+
+    return (
+        <View
+            style={[
+                scheduleStyles.item,
+                item.isCompleted && scheduleStyles.itemCompleted,
+            ]}
+        >
+            <View style={scheduleStyles.itemLeft}>
+                <TouchableOpacity
+                    onPress={() => onComplete(item.id, type)}
+                    style={scheduleStyles.checkContainer}
+                >
+                    <View
+                        style={[
+                            scheduleStyles.checkbox,
+                            item.isCompleted && scheduleStyles.checkboxChecked,
+                        ]}
+                    >
+                        {item.isCompleted && (
+                            <Text style={scheduleStyles.checkMark}>✓</Text>
+                        )}
+                    </View>
+                </TouchableOpacity>
+
+                <View style={scheduleStyles.content}>
+                    <View style={scheduleStyles.headerRow}>
+                        <Text
+                            style={[
+                                scheduleStyles.title,
+                                item.isCompleted &&
+                                    scheduleStyles.titleCompleted,
+                            ]}
+                        >
+                            {isTargetTask
+                                ? item.skillName || item.title
+                                : item.title}
+                        </Text>
+                        <View style={scheduleStyles.typeBadge}>
+                            <Text style={scheduleStyles.typeText}>
+                                {isTargetTask ? 'Skill' : 'Task'}
+                            </Text>
+                        </View>
+                    </View>
+
+                    {isTargetTask && (
+                        <View style={scheduleStyles.targetInfo}>
+                            <Text style={scheduleStyles.dayInfo}>
+                                Day {displayDay} of {item.totalDays}
+                                {item.dayPlan?.task && ' · '}
+                                {item.dayPlan?.task && (
+                                    <Text
+                                        style={scheduleStyles.dayTask}
+                                        numberOfLines={1}
+                                    >
+                                        {item.dayPlan.task}
+                                    </Text>
+                                )}
+                            </Text>
+                        </View>
+                    )}
+
+                    {!isTargetTask && item.deadline && timeInfo && (
+                        <Text
+                            style={[
+                                scheduleStyles.deadline,
+                                { color: timeInfo.color },
+                            ]}
+                        >
+                            ⏰ {item.deadline} · {timeInfo.text}
+                        </Text>
+                    )}
+
+                    {isTargetTask && (
+                        <View style={scheduleStyles.timeBadge}>
+                            <Text style={scheduleStyles.timeText}>
+                                🎯 {item.dailyMinutes || 30} min
+                            </Text>
+                        </View>
+                    )}
+                </View>
+            </View>
+
+            {isTargetTask && !item.isCompleted && (
+                <TouchableOpacity
+                    onPress={() => onSkip(item.id)}
+                    style={scheduleStyles.skipButton}
+                >
+                    <Text style={scheduleStyles.skipText}>Skip</Text>
+                </TouchableOpacity>
+            )}
+
+            {!isTargetTask && !item.isCompleted && (
+                <TouchableOpacity
+                    onPress={() => onComplete(item.id, type, true)}
+                    style={scheduleStyles.deleteButton}
+                >
+                    <Text style={scheduleStyles.deleteText}>✕</Text>
+                </TouchableOpacity>
+            )}
+        </View>
+    );
+};
+
+// Daily Stats Component
+const DailyStats = ({ targetTasks, manualTasks, onRefresh }) => {
+    const completedTargets = targetTasks.filter(
+        (t) => t.isCompletedToday || t.isCompleted,
+    ).length;
+    const completedManual = manualTasks.filter((t) => t.isCompleted).length;
+    const totalTasks = targetTasks.length + manualTasks.length;
+    const completedTasks = completedTargets + completedManual;
+    const progress = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
+
+    // Calculate total time for remaining target tasks
+    const calculateTotalTime = () => {
+        const totalMinutes = targetTasks
+            .filter((task) => !(task.isCompletedToday || task.isCompleted))
+            .reduce((sum, task) => sum + (task.dailyMinutes || 30), 0);
+
+        if (totalMinutes < 60) return `${totalMinutes}m`;
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+    };
+
+    return (
+        <View style={statsStyles.container}>
+            <View style={statsStyles.header}>
+                <Text style={statsStyles.headerTitle}>📊 Today's Progress</Text>
+                <TouchableOpacity
+                    onPress={onRefresh}
+                    style={statsStyles.refreshButton}
+                >
+                    <Text style={statsStyles.refreshText}>🔄</Text>
+                </TouchableOpacity>
+            </View>
+
+            <View style={statsStyles.progressContainer}>
+                <View style={statsStyles.progressBar}>
+                    <View
+                        style={[
+                            statsStyles.progressFill,
+                            { width: `${progress}%` },
+                        ]}
+                    />
+                </View>
+                <Text style={statsStyles.progressText}>
+                    {completedTasks}/{totalTasks} tasks ({Math.round(progress)}
+                    %)
+                </Text>
+            </View>
+
+            <View style={statsStyles.statsGrid}>
+                <View style={statsStyles.statBox}>
+                    <Text style={statsStyles.statNumber}>
+                        🎯 {completedTargets}/{targetTasks.length}
+                    </Text>
+                    <Text style={statsStyles.statLabel}>Skills</Text>
+                </View>
+
+                <View style={statsStyles.statBox}>
+                    <Text style={statsStyles.statNumber}>
+                        ✅ {completedManual}/{manualTasks.length}
+                    </Text>
+                    <Text style={statsStyles.statLabel}>Tasks</Text>
+                </View>
+
+                <View style={statsStyles.statBox}>
+                    <Text style={statsStyles.statNumber}>
+                        ⏱️ {calculateTotalTime()}
+                    </Text>
+                    <Text style={statsStyles.statLabel}>Remaining Time</Text>
+                </View>
+            </View>
+        </View>
+    );
+};
+
+// ========== MAIN SCREEN ==========
+const DailyScheduleScreen = () => {
+    const [activeTab, setActiveTab] = useState('all'); // 'all', 'targets', 'tasks'
+    const [schedule, setSchedule] = useState([]);
+    const [targetTasks, setTargetTasks] = useState([]);
+    const [manualTasks, setManualTasks] = useState([]);
+    const [refreshing, setRefreshing] = useState(false);
+    const [loading, setLoading] = useState(true);
+
+    // New task states
+    const [newTaskTitle, setNewTaskTitle] = useState('');
+    const [showTimePicker, setShowTimePicker] = useState(false);
+    const [selectedTime, setSelectedTime] = useState(null);
+    const [addTaskModalVisible, setAddTaskModalVisible] = useState(false);
+
+    // Complete task modal
+    const [completeModalVisible, setCompleteModalVisible] = useState(false);
+    const [selectedTask, setSelectedTask] = useState(null);
+    const [taskNotes, setTaskNotes] = useState('');
+    const [completingTaskType, setCompletingTaskType] = useState(null);
+    const lastFetchedDateRef = useRef(
+        new Date().toISOString().split('T')[0],
+    );
+
+    useFocusEffect(
+        useCallback(() => {
+            fetchTodaySchedule();
+        }, []),
+    );
+
+    const fetchTodaySchedule = async () => {
+        try {
+            setLoading(true);
+            lastFetchedDateRef.current = new Date().toISOString().split('T')[0];
+
+            // Fetch today's targets
+            const today = new Date().toISOString().split('T')[0];
+            const targetsRes = await API.get('/targets/today');
+
+            // Process targets to include day plan
+            const processedTargets = (targetsRes.data.result || []).map(
+                (target) => {
+                    // Get day plans
+                    let dayPlans = [];
+                    if (target.dayPlans) {
+                        if (typeof target.dayPlans === 'string') {
+                            try {
+                                dayPlans = JSON.parse(target.dayPlans);
+                            } catch (e) {
+                                dayPlans = [];
+                            }
+                        } else if (Array.isArray(target.dayPlans)) {
+                            dayPlans = target.dayPlans;
+                        }
+                    }
+
+                    const isCompletedToday = !!target.isCompletedToday;
+                    const displayDay = isCompletedToday
+                        ? Math.max((target.currentDay || 1) - 1, 1)
+                        : target.currentDay || 1;
+                    const todayPlan = dayPlans[displayDay - 1] || {};
+
+                    return {
+                        ...target,
+                        type: 'target',
+                        displayDay,
+                        dayPlan: todayPlan,
+                        isCompleted: isCompletedToday,
+                    };
+                },
+            );
+
+            setTargetTasks(processedTargets);
+
+            // Fetch manual tasks
+            const tasksRes = await API.get('/tasks');
+            const todayTasks = (tasksRes.data.result || []).filter((task) => {
+                if (!task.createdAt) return true; // Show all if no createdAt
+                const taskDate = new Date(task.createdAt)
+                    .toISOString()
+                    .split('T')[0];
+                return taskDate === today;
+            });
+
+            setManualTasks(todayTasks);
+
+            // Combine all tasks
+            const allTasks = [...processedTargets, ...todayTasks];
+            allTasks.sort((a, b) => {
+                // Sort by completion status (incomplete first)
+                if (a.isCompleted !== b.isCompleted) {
+                    return a.isCompleted ? 1 : -1;
+                }
+
+                // Then by type (targets first)
+                if (a.type !== b.type) {
+                    return a.type === 'target' ? -1 : 1;
+                }
+
+                // Then by deadline if available
+                if (a.deadline && b.deadline) {
+                    return parseTime(a.deadline) > parseTime(b.deadline)
+                        ? 1
+                        : -1;
+                }
+
+                return 0;
+            });
+
+            setSchedule(allTasks);
+        } catch (err) {
+            console.log('[SCHEDULE FETCH ERROR]', err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        let timerId;
+
+        const scheduleNextMidnightRefresh = () => {
+            const now = new Date();
+            const nextMidnight = new Date(now);
+            nextMidnight.setHours(24, 0, 2, 0);
+            const delay = Math.max(nextMidnight.getTime() - now.getTime(), 1000);
+
+            timerId = setTimeout(async () => {
+                await fetchTodaySchedule();
+                scheduleNextMidnightRefresh();
+            }, delay);
+        };
+
+        scheduleNextMidnightRefresh();
+
+        return () => {
+            if (timerId) clearTimeout(timerId);
+        };
+    }, []);
+
+    useEffect(() => {
+        const sub = AppState.addEventListener('change', (state) => {
+            if (state !== 'active') return;
+            const todayKey = new Date().toISOString().split('T')[0];
+            if (todayKey !== lastFetchedDateRef.current) {
+                fetchTodaySchedule();
+            }
+        });
+
+        return () => sub.remove();
+    }, []);
+
+    const onRefresh = async () => {
+        setRefreshing(true);
+        await fetchTodaySchedule();
+        setRefreshing(false);
+    };
+
+    const parseTime = (input) => {
+        if (!input) return null;
+        const match = input.match(/(\d{1,2}):(\d{2})\s?(AM|PM)?/i);
+        if (!match) return null;
 
         let [, hour, minute, period] = match;
         hour = parseInt(hour);
@@ -75,173 +445,239 @@ const TodoItem = ({ task, onDelete, onToggle }) => {
 
         if (period) {
             period = period.toUpperCase();
-            if (period === "PM" && hour < 12) hour += 12;
-            if (period === "AM" && hour === 12) hour = 0;
+            if (period === 'PM' && hour < 12) hour += 12;
+            if (period === 'AM' && hour === 12) hour = 0;
         }
 
-        const deadline = new Date();
-        deadline.setHours(hour, minute, 0, 0);
-
-        const diff = deadline - now;
-        if (diff <= 0) return "⏰ Time’s up";
-
-        const h = Math.floor(diff / (1000 * 60 * 60));
-        const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-
-        return `${h}h ${m}m left`;
+        return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:00`;
     };
-
-    useEffect(() => {
-        if (!task.deadline) return;
-
-        setRemainingTime(calculateRemainingTime());
-        const interval = setInterval(() => {
-            setRemainingTime(calculateRemainingTime());
-        }, 60000); // update every minute
-
-        return () => clearInterval(interval);
-    }, [task.deadline]);
-
-    return (
-        <View style={todoStyles.item}>
-            <TouchableOpacity onPress={() => onToggle(task.id)} style={todoStyles.checkContainer}>
-                <View style={[todoStyles.checkbox, task.isCompleted && todoStyles.checkboxChecked]}>
-                    {task.isCompleted && <Text style={todoStyles.checkMark}>✓</Text>}
-                </View>
-            </TouchableOpacity>
-
-            <View style={todoStyles.textContainer}>
-                <Text style={[todoStyles.title, task.isCompleted && todoStyles.titleCompleted]}>
-                    {task.title}
-                </Text>
-
-                {task.deadline && (
-                    <Text style={todoStyles.deadline}>
-                        {task.deadline} · {remainingTime}
-                    </Text>
-                )}
-            </View>
-
-            <TouchableOpacity onPress={() => onDelete(task.id)} style={todoStyles.deleteButton}>
-                <Text style={todoStyles.deleteText}>✕</Text>
-            </TouchableOpacity>
-        </View>
-    );
-};
-
-
-// This file (app/index.jsx) is the default entry/home page
-const DailyTodoScreen = () => {
-    // 1. STATE for tasks and new task input
-    const [tasks, setTasks] = useState([]);
-    const [newTaskTitle, setNewTaskTitle] = useState('');
-    const [newTaskDeadline, setNewTaskDeadline] = useState('');
-    const [showTimePicker, setShowTimePicker] = useState(false);
-const [selectedTime, setSelectedTime] = useState(null); // Date object
- // Simple text input for deadline
-useEffect(() => {
-    const fetchTasks = async () => {
-      console.log("[DEBUG] Fetching tasks...")
-        try {
-const res = await API.get('/tasks')
-setTasks(res.data.result)
-        } catch (err) {
-            console.log(err)
-            console.log("[DEBUG] Fetch tasks error:", err.message)
-        }
-    }
-    fetchTasks()
-}, [])
-
-    // --- 2. LOGIC FUNCTIONS ---
-
-    const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]\s?(AM|PM)?$/i;
-
-   //  const addTask = () => {
-   //      if (newTaskTitle.trim().length > 0) {
-   //          if (newTaskDeadline && !timeRegex.test(newTaskDeadline.trim())) {
-   //              alert("Time format invalid. Use e.g., 8:40 PM or 09:00");
-   //              return;
-   //          }
-
-   //          const newId = Date.now().toString();
-   //          const newTask = {
-   //              id: newId,
-   //              title: newTaskTitle.trim(),
-   //              isCompleted: false,
-   //              deadline: newTaskDeadline.trim(),
-   //          };
-   //          setTasks([...tasks, newTask]);
-   //          setNewTaskTitle('');
-   //          setNewTaskDeadline('');
-   //      }
-   //  };
-
-    // Toggles the completion status of a task
 
     const addTask = async () => {
-    if (!newTaskTitle.trim()) return
-    if (newTaskDeadline && !timeRegex.test(newTaskDeadline.trim())) return alert('Time format invalid')
+        if (!newTaskTitle.trim()) {
+            alert('Please enter a task title');
+            return;
+        }
 
-    const newTask = {
-        title: newTaskTitle.trim(),
-        deadline: selectedTime
-    ? `${selectedTime.getHours().toString().padStart(2,'0')}:${selectedTime.getMinutes().toString().padStart(2,'0')}:00`
-    : null
-,
-        isCompleted: false
+        const newTask = {
+            title: newTaskTitle.trim(),
+            deadline: selectedTime
+                ? `${selectedTime.getHours().toString().padStart(2, '0')}:${selectedTime.getMinutes().toString().padStart(2, '0')}:00`
+                : null,
+            isCompleted: false,
+        };
+
+        try {
+            const res = await API.post('/tasks', newTask);
+            const createdTask = res.data.result;
+
+            setManualTasks((prev) => [...prev, createdTask]);
+            setSchedule((prev) => [...prev, { ...createdTask, type: 'task' }]);
+
+            setNewTaskTitle('');
+            setSelectedTime(null);
+            setAddTaskModalVisible(false);
+
+            alert('Task added successfully!');
+        } catch (err) {
+            console.log('[ADD TASK ERROR]', err.message);
+            alert('Error adding task: ' + err.message);
+        }
     };
-  console.log("[DEBUG] Adding task:", newTask)
-    try {
-const res = await API.post('/tasks', newTask)
-setTasks(prev => [...prev, res.data.result])
-        setNewTaskTitle('')
-        setSelectedTime(null);
-        setNewTaskDeadline('')
-        console.log("[DEBUG] Task added successfully")
-    } catch (err) { console.log(err)
-          console.log("[DEBUG] Add task error:", err.message)
-    }
-}
 
+    const handleCompleteTask = (taskId, type, isDelete = false) => {
+        const task =
+            type === 'target'
+                ? targetTasks.find((t) => t.id === taskId)
+                : manualTasks.find((t) => t.id === taskId);
 
-   //  const toggleTask = (id) => {
-   //      setTasks(prevTasks =>
-   //          prevTasks.map(task =>
-   //              task.id === id ? { ...task, isCompleted: !task.isCompleted } : task
-   //          )
-   //      );
-   //  };
+        if (!task) return;
 
-    // Deletes a task
+        setSelectedTask(task);
+        setCompletingTaskType(type);
 
+        if (isDelete) {
+            deleteManualTask(taskId);
+            return;
+        }
 
-   //  const deleteTask = (id) => {
-   //      setTasks(prevTasks => prevTasks.filter(task => task.id !== id));
-   //  };
+        if (type === 'target') {
+            setTaskNotes('');
+            setCompleteModalVisible(true);
+        } else {
+            toggleManualTask(taskId);
+        }
+    };
 
+    const confirmCompleteTarget = async () => {
+        if (!selectedTask) return;
 
-   const toggleTask = async (id) => {
-    const task = tasks.find(t => t.id === id)
-    try {
-        const res = await API.patch(`/tasks/${id}/toggle`)
+        try {
+            const res = await API.patch(
+                `/targets/${selectedTask.id}/complete-day`,
+                {
+                    notes: taskNotes,
+                    timeSpent: selectedTask.dailyMinutes || 30,
+                },
+            );
 
-setTasks(prev =>
-  prev.map(t => t.id === id ? res.data.result : t)
-)
+            // Update local state
+            const updatedTargets = targetTasks.map((t) =>
+                t.id === selectedTask.id
+                    ? { ...res.data.result, type: 'target', isCompleted: true }
+                    : t,
+            );
 
-    } catch (err) { console.log(err) }
-}
+            const updatedSchedule = schedule.map((item) =>
+                item.id === selectedTask.id && item.type === 'target'
+                    ? { ...res.data.result, type: 'target', isCompleted: true }
+                    : item,
+            );
 
-const deleteTask = async (id) => {
-    try {
-      await API.delete(`/tasks/${id}`)
+            setTargetTasks(updatedTargets);
+            setSchedule(updatedSchedule);
+            setCompleteModalVisible(false);
+            setSelectedTask(null);
+            setTaskNotes('');
 
-        setTasks(tasks.filter(t => t.id !== id))
-    } catch (err) { console.log(err) }
-}
+            alert('Great! Skill progress updated!');
+        } catch (err) {
+            console.log('[COMPLETE TARGET ERROR]', err.message);
+            alert('Error completing task: ' + err.message);
+        }
+    };
 
+    const skipTarget = async (targetId) => {
+        try {
+            const res = await API.patch(`/targets/${targetId}/skip-day`);
 
+            // Update local state
+            const updatedTargets = targetTasks.map((t) =>
+                t.id === targetId ? { ...res.data.result, type: 'target' } : t,
+            );
+
+            const updatedSchedule = schedule.map((item) =>
+                item.id === targetId && item.type === 'target'
+                    ? { ...res.data.result, type: 'target' }
+                    : item,
+            );
+
+            setTargetTasks(updatedTargets);
+            setSchedule(updatedSchedule);
+
+            alert("Day skipped. Don't forget to catch up tomorrow!");
+        } catch (err) {
+            console.log('[SKIP TARGET ERROR]', err.message);
+            alert('Error skipping day: ' + err.message);
+        }
+    };
+
+    const toggleManualTask = async (taskId) => {
+        try {
+            const res = await API.patch(`/tasks/${taskId}/toggle`);
+
+            const updatedTasks = manualTasks.map((t) =>
+                t.id === taskId ? res.data.result : t,
+            );
+
+            const updatedSchedule = schedule.map((item) =>
+                item.id === taskId && item.type === 'task'
+                    ? { ...res.data.result, type: 'task' }
+                    : item,
+            );
+
+            setManualTasks(updatedTasks);
+            setSchedule(updatedSchedule);
+        } catch (err) {
+            console.log('[TOGGLE TASK ERROR]', err.message);
+        }
+    };
+
+    const deleteManualTask = async (taskId) => {
+        try {
+            await API.delete(`/tasks/${taskId}`);
+
+            const updatedTasks = manualTasks.filter((t) => t.id !== taskId);
+            const updatedSchedule = schedule.filter(
+                (item) => !(item.id === taskId && item.type === 'task'),
+            );
+
+            setManualTasks(updatedTasks);
+            setSchedule(updatedSchedule);
+        } catch (err) {
+            console.log('[DELETE TASK ERROR]', err.message);
+        }
+    };
+
+    const filteredSchedule = schedule.filter((item) => {
+        if (activeTab === 'all') return true;
+        if (activeTab === 'targets') return item.type === 'target';
+        if (activeTab === 'tasks') return item.type === 'task';
+        return true;
+    });
+
+    const renderEmptyState = () => {
+        if (loading) {
+            return (
+                <View style={emptyStyles.container}>
+                    <ActivityIndicator
+                        size='large'
+                        color='#4a90e2'
+                    />
+                    <Text style={emptyStyles.text}>
+                        Loading your schedule...
+                    </Text>
+                </View>
+            );
+        }
+
+        const emptyStates = {
+            all: {
+                emoji: '📅',
+                title: 'Schedule empty',
+                text: 'Add skills or tasks to plan your day',
+            },
+            targets: {
+                emoji: '🎯',
+                title: 'No skill tasks today',
+                text: 'Add skills in the Target tab to see them here',
+            },
+            tasks: {
+                emoji: '📝',
+                title: 'No manual tasks',
+                text: 'Add tasks below to organize your day',
+            },
+        };
+
+        const currentEmpty = emptyStates[activeTab];
+
+        return (
+            <View style={emptyStyles.container}>
+                <Text style={emptyStyles.emoji}>{currentEmpty.emoji}</Text>
+                <Text style={emptyStyles.title}>{currentEmpty.title}</Text>
+                <Text style={emptyStyles.text}>{currentEmpty.text}</Text>
+
+                <View style={emptyStyles.buttonRow}>
+                    {activeTab !== 'targets' && (
+                        <TouchableOpacity
+                            style={[emptyStyles.button, { marginRight: 10 }]}
+                            onPress={() => setAddTaskModalVisible(true)}
+                        >
+                            <Text style={emptyStyles.buttonText}>Add Task</Text>
+                        </TouchableOpacity>
+                    )}
+                    <TouchableOpacity
+                        style={[
+                            emptyStyles.button,
+                            { backgroundColor: '#28a745' },
+                        ]}
+                        onPress={fetchTodaySchedule}
+                    >
+                        <Text style={emptyStyles.buttonText}>Refresh</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        );
+    };
 
     return (
         <KeyboardAvoidingView
@@ -249,217 +685,701 @@ const deleteTask = async (id) => {
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
         >
-            <Text style={styles.header}>✅ Daily To-Do List</Text>
+            <View style={styles.header}>
+                <Text style={styles.headerTitle}> Daily Schedule</Text>
+                <Text style={styles.headerSubtitle}>
+                    {new Date().toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        month: 'long',
+                        day: 'numeric',
+                    })}
+                </Text>
+            </View>
 
-            {/* Area for Daily Tasks */}
-            <View style={styles.taskArea}>
+            <DailyStats
+                targetTasks={targetTasks}
+                manualTasks={manualTasks}
+                onRefresh={onRefresh}
+            />
 
-                {/* Task List */}
-                <FlatList
-                    data={tasks}
-                    keyExtractor={(item) => item.id}
-                    renderItem={({ item }) => (
-                        <TodoItem
-                            task={item}
-                            onDelete={deleteTask}
-                            onToggle={toggleTask}
+            <View style={styles.tabContainer}>
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                >
+                    <TouchableOpacity
+                        style={[
+                            styles.tab,
+                            activeTab === 'all' && styles.activeTab,
+                        ]}
+                        onPress={() => setActiveTab('all')}
+                    >
+                        <Text
+                            style={[
+                                styles.tabText,
+                                activeTab === 'all' && styles.activeTabText,
+                            ]}
+                        >
+                            All ({schedule.length})
+                        </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={[
+                            styles.tab,
+                            activeTab === 'targets' && styles.activeTab,
+                        ]}
+                        onPress={() => setActiveTab('targets')}
+                    >
+                        <Text
+                            style={[
+                                styles.tabText,
+                                activeTab === 'targets' && styles.activeTabText,
+                            ]}
+                        >
+                            Skills ({targetTasks.length})
+                        </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={[
+                            styles.tab,
+                            activeTab === 'tasks' && styles.activeTab,
+                        ]}
+                        onPress={() => setActiveTab('tasks')}
+                    >
+                        <Text
+                            style={[
+                                styles.tabText,
+                                activeTab === 'tasks' && styles.activeTabText,
+                            ]}
+                        >
+                            Tasks ({manualTasks.length})
+                        </Text>
+                    </TouchableOpacity>
+                </ScrollView>
+            </View>
+
+            <FlatList
+                data={filteredSchedule}
+                keyExtractor={(item) => `${item.type}-${item.id}`}
+                renderItem={({ item }) => (
+                    <ScheduleItem
+                        item={item}
+                        onComplete={handleCompleteTask}
+                        onSkip={skipTarget}
+                        type={item.type}
+                    />
+                )}
+                ListEmptyComponent={renderEmptyState}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        colors={['#4a90e2']}
+                        tintColor='#4a90e2'
+                    />
+                }
+                contentContainerStyle={{ paddingBottom: 100 }}
+            />
+
+            {/* Add Task FAB */}
+            <TouchableOpacity
+                style={styles.fab}
+                onPress={() => setAddTaskModalVisible(true)}
+            >
+                <Text style={styles.fabText}>+</Text>
+            </TouchableOpacity>
+
+            {/* Add Task Modal */}
+            <Modal
+                animationType='slide'
+                transparent={true}
+                visible={addTaskModalVisible}
+                onRequestClose={() => setAddTaskModalVisible(false)}
+            >
+                <View style={modalStyles.overlay}>
+                    <KeyboardAvoidingView
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                        style={modalStyles.content}
+                    >
+                        <Text style={modalStyles.title}>➕ Add Task</Text>
+
+                        <TextInput
+                            style={modalStyles.input}
+                            placeholder='Task title'
+                            value={newTaskTitle}
+                            onChangeText={setNewTaskTitle}
+                            autoFocus
                         />
-                    )}
-                    ListEmptyComponent={() => (
-                        <Text style={styles.emptyText}>No daily tasks yet! Add one below.</Text>
-                    )}
-                />
-            </View>
 
+                        <TouchableOpacity
+                            style={modalStyles.timeButton}
+                            onPress={() => setShowTimePicker(true)}
+                        >
+                            <Text
+                                style={{
+                                    color: selectedTime ? '#000' : '#999',
+                                }}
+                            >
+                                {selectedTime
+                                    ? `⏰ ${selectedTime.getHours().toString().padStart(2, '0')}:${selectedTime.getMinutes().toString().padStart(2, '0')}`
+                                    : 'Add optional time (e.g., 8:40 PM)'}
+                            </Text>
+                        </TouchableOpacity>
 
-            {/* Task Input Form */}
-            <View style={styles.inputContainer}>
-                <TextInput
-                    style={styles.textInput}
-                    placeholder="Enter new task title..."
-                    value={newTaskTitle}
-                    onChangeText={setNewTaskTitle}
-                />
-                {/* Simple Deadline Input (You can upgrade this to a date picker later) */}
-<TouchableOpacity
-    style={styles.textInput}
-    onPress={() => setShowTimePicker(true)}
->
-    <Text style={{ color: selectedTime ? '#000' : '#999' }}>
-        {selectedTime
-            ? `${selectedTime.getHours().toString().padStart(2,'0')}:${selectedTime.getMinutes().toString().padStart(2,'0')}`
-            : "Optional time (e.g., 8:40 PM)"}
-    </Text>
-</TouchableOpacity>
+                        {showTimePicker && (
+                            <DateTimePicker
+                                value={selectedTime || new Date()}
+                                mode='time'
+                                is24Hour={false}
+                                display={
+                                    Platform.OS === 'ios'
+                                        ? 'spinner'
+                                        : 'default'
+                                }
+                                onChange={(event, date) => {
+                                    setShowTimePicker(false);
+                                    if (date) setSelectedTime(date);
+                                }}
+                            />
+                        )}
 
-{showTimePicker && (
-    <DateTimePicker
-        value={selectedTime || new Date()}
-        mode="time"
-        is24Hour={false} // false → 12-hour format with AM/PM
-        display={Platform.OS === "ios" ? "spinner" : "default"} // digital on iOS, native on Android
-        onChange={(event, date) => {
-            setShowTimePicker(false);
-            if (date) setSelectedTime(date);
-        }}
-    />
-)}
+                        <View style={modalStyles.buttonRow}>
+                            <TouchableOpacity
+                                style={[
+                                    modalStyles.button,
+                                    modalStyles.cancelButton,
+                                ]}
+                                onPress={() => setAddTaskModalVisible(false)}
+                            >
+                                <Text style={modalStyles.cancelButtonText}>
+                                    Cancel
+                                </Text>
+                            </TouchableOpacity>
 
+                            <TouchableOpacity
+                                style={[
+                                    modalStyles.button,
+                                    modalStyles.addButton,
+                                ]}
+                                onPress={addTask}
+                                disabled={!newTaskTitle.trim()}
+                            >
+                                <Text style={modalStyles.addButtonText}>
+                                    Add Task
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </KeyboardAvoidingView>
+                </View>
+            </Modal>
 
-                <TouchableOpacity style={styles.addButton} onPress={addTask}>
-                    <Text style={styles.addButtonText}>Add Task</Text>
-                </TouchableOpacity>
-            </View>
+            {/* Complete Target Modal */}
+            <Modal
+                animationType='slide'
+                transparent={true}
+                visible={completeModalVisible}
+                onRequestClose={() => setCompleteModalVisible(false)}
+            >
+                <View style={modalStyles.overlay}>
+                    <View style={modalStyles.content}>
+                        <Text style={modalStyles.title}>
+                            ✅ Complete Skill Task
+                        </Text>
 
+                        {selectedTask && (
+                            <>
+                                <Text style={modalStyles.taskName}>
+                                    {selectedTask.skillName ||
+                                        selectedTask.title}
+                                </Text>
+                                <Text style={modalStyles.taskInfo}>
+                                    Day {selectedTask.currentDay || 1} ·{' '}
+                                    {selectedTask.dailyMinutes || 30} minutes
+                                </Text>
 
+                                {selectedTask.dayPlan?.task && (
+                                    <View style={modalStyles.planContainer}>
+                                        <Text style={modalStyles.planLabel}>
+                                            Today's plan:
+                                        </Text>
+                                        <Text style={modalStyles.planText}>
+                                            {selectedTask.dayPlan.task}
+                                        </Text>
+                                    </View>
+                                )}
 
+                                <TextInput
+                                    style={modalStyles.notesInput}
+                                    placeholder='What did you learn today? (optional)'
+                                    value={taskNotes}
+                                    onChangeText={setTaskNotes}
+                                    multiline
+                                    numberOfLines={3}
+                                    textAlignVertical='top'
+                                />
+                            </>
+                        )}
 
+                        <View style={modalStyles.buttonRow}>
+                            <TouchableOpacity
+                                style={[
+                                    modalStyles.button,
+                                    modalStyles.cancelButton,
+                                ]}
+                                onPress={() => {
+                                    setCompleteModalVisible(false);
+                                    setSelectedTask(null);
+                                    setTaskNotes('');
+                                }}
+                            >
+                                <Text style={modalStyles.cancelButtonText}>
+                                    Cancel
+                                </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[
+                                    modalStyles.button,
+                                    modalStyles.completeButton,
+                                ]}
+                                onPress={confirmCompleteTarget}
+                            >
+                                <Text style={modalStyles.completeButtonText}>
+                                    Mark Complete
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </KeyboardAvoidingView>
     );
 };
 
-// --- STYLES FOR THE MAIN SCREEN ---
+// ========== STYLES ==========
+
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        padding: 20,
-        backgroundColor: '#f5f5f5',
-        paddingTop: 50,
+        backgroundColor: '#f4f6f8',
     },
     header: {
-        fontSize: 28,
-        fontWeight: 'bold',
-        marginBottom: 20,
-        color: '#333',
+        backgroundColor: 'transparent',
+        paddingTop: 8,
+        paddingHorizontal: 16,
+        paddingBottom: 8,
+        marginBottom: 2,
     },
-    taskArea: {
-        flex: 1,
-        backgroundColor: '#fff',
-        borderRadius: 8,
-        padding: 10,
-        marginBottom: 10,
-        elevation: 2,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.2,
-        shadowRadius: 1.41,
+    headerTitle: {
+        fontSize: 26,
+        fontWeight: '700',
+        color: '#1f2937',
+        marginBottom: 2,
     },
-    emptyText: {
-        textAlign: 'center',
-        padding: 20,
-        color: '#999',
+    headerSubtitle: {
+        fontSize: 14,
+        color: '#6b7280',
     },
-    // --- Input and Add Button Styles ---
-    inputContainer: {
-        paddingBottom: 10,
-        borderBottomWidth: 1,
-        borderBottomColor: '#ddd',
-        marginBottom: 10,
+    tabContainer: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        marginBottom: 8,
     },
-    textInput: {
+    tab: {
+        paddingHorizontal: 16,
+        paddingVertical: 9,
+        marginRight: 8,
+        borderRadius: 18,
+        backgroundColor: '#ffffff',
         borderWidth: 1,
-        borderColor: '#ccc',
-        padding: 10,
-        marginBottom: 5,
-        borderRadius: 5,
-        backgroundColor: '#fff',
+        borderColor: '#e5e7eb',
     },
-    addButton: {
-        backgroundColor: '#28a745', // Success green
-        padding: 12,
-        borderRadius: 5,
-        alignItems: 'center',
-        marginTop: 5,
+    activeTab: {
+        backgroundColor: '#1d4ed8',
+        borderColor: '#1d4ed8',
     },
-    addButtonText: {
+    tabText: {
+        color: '#4b5563',
+        fontWeight: '600',
+        fontSize: 13,
+    },
+    activeTabText: {
         color: '#fff',
-        fontWeight: 'bold',
-        fontSize: 16,
     },
-    // --- Navigation Styles (retained from previous step) ---
-    navBar: {
-        flexDirection: 'row',
+    fab: {
+        position: 'absolute',
+        right: 16,
+        bottom: 24,
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        backgroundColor: '#1d4ed8',
+        alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 10,
-        borderTopWidth: 1,
-        borderTopColor: '#ccc',
-        backgroundColor: '#fff',
-        borderRadius: 8,
-        overflow: 'hidden',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 5,
+        elevation: 5,
     },
-    navButton: {
-        flex: 1,
-        paddingHorizontal: 20,
-        paddingVertical: 12,
-        borderRadius: 8,
-        backgroundColor: '#4a90e2',
-        alignItems: 'center',
-        marginHorizontal: 5,
-    },
-    navText: {
+    fabText: {
         color: '#fff',
-        fontSize: 16,
+        fontSize: 28,
         fontWeight: '700',
     },
 });
 
-// --- STYLES FOR THE INDIVIDUAL TODO ITEM ---
-const todoStyles = StyleSheet.create({
+const scheduleStyles = StyleSheet.create({
     item: {
+        backgroundColor: '#fff',
+        marginHorizontal: 16,
+        marginVertical: 5,
+        padding: 14,
+        borderRadius: 14,
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: '#eee',
-        backgroundColor: '#fff',
+        justifyContent: 'space-between',
+        borderWidth: 1,
+        borderColor: '#e8edf3',
+    },
+    itemCompleted: {
+        opacity: 0.85,
+        backgroundColor: '#f8fbff',
+        borderColor: '#dbeafe',
+    },
+    itemLeft: {
+        flexDirection: 'row',
+        flex: 1,
+        alignItems: 'center',
     },
     checkContainer: {
-        paddingRight: 15,
-        paddingLeft: 5,
+        marginRight: 12,
     },
     checkbox: {
         width: 24,
         height: 24,
-        borderRadius: 4,
-        borderWidth: 2,
-        borderColor: '#4a90e2',
+        borderRadius: 6,
+        borderWidth: 1.8,
+        borderColor: '#1d4ed8',
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: '#fff',
     },
     checkboxChecked: {
-        backgroundColor: '#4a90e2',
+        backgroundColor: '#1d4ed8',
     },
     checkMark: {
         color: '#fff',
         fontWeight: 'bold',
         fontSize: 16,
     },
-    textContainer: {
+    content: {
         flex: 1,
     },
+    headerRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: 6,
+    },
     title: {
-        fontSize: 16,
-        color: '#333',
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#111827',
+        flex: 1,
     },
     titleCompleted: {
         textDecorationLine: 'line-through',
         color: '#999',
     },
+    typeBadge: {
+        backgroundColor: '#eff6ff',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 6,
+        marginLeft: 8,
+    },
+    typeText: {
+        fontSize: 10,
+        color: '#1d4ed8',
+        fontWeight: '600',
+    },
+    targetInfo: {
+        marginBottom: 4,
+    },
+    dayInfo: {
+        fontSize: 13,
+        color: '#6b7280',
+    },
+    dayTask: {
+        fontSize: 13,
+        color: '#333',
+        fontStyle: 'italic',
+    },
     deadline: {
-        fontSize: 12,
-        color: '#f0ad4e', // Warning orange
+        fontSize: 11,
         marginTop: 2,
         fontStyle: 'italic',
     },
+    timeBadge: {
+        backgroundColor: '#ecfdf5',
+        alignSelf: 'flex-start',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 6,
+        marginTop: 4,
+    },
+    timeText: {
+        fontSize: 11,
+        color: '#059669',
+        fontWeight: '600',
+    },
+    skipButton: {
+        backgroundColor: '#f3f4f6',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 8,
+        marginLeft: 8,
+    },
+    skipText: {
+        color: '#374151',
+        fontSize: 12,
+        fontWeight: '600',
+    },
     deleteButton: {
-        padding: 10,
+        padding: 8,
+        marginLeft: 8,
     },
     deleteText: {
-        color: 'red',
+        color: '#dc3545',
         fontSize: 18,
         fontWeight: 'bold',
     },
 });
 
-export default DailyTodoScreen;
+const statsStyles = StyleSheet.create({
+    container: {
+        backgroundColor: '#fff',
+        marginHorizontal: 16,
+        marginVertical: 8,
+        padding: 16,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: '#e8edf3',
+    },
+    header: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    headerTitle: {
+        fontSize: 17,
+        fontWeight: '700',
+        color: '#111827',
+    },
+    refreshButton: {
+        padding: 8,
+    },
+    refreshText: {
+        fontSize: 18,
+    },
+    progressContainer: {
+        marginBottom: 20,
+    },
+    progressBar: {
+        height: 9,
+        backgroundColor: '#e5e7eb',
+        borderRadius: 4,
+        overflow: 'hidden',
+        marginBottom: 8,
+    },
+    progressFill: {
+        height: '100%',
+        backgroundColor: '#1d4ed8',
+        borderRadius: 4,
+    },
+    progressText: {
+        fontSize: 13,
+        color: '#4b5563',
+        textAlign: 'center',
+    },
+    statsGrid: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+    },
+    statBox: {
+        alignItems: 'center',
+        flex: 1,
+    },
+    statNumber: {
+        fontSize: 17,
+        fontWeight: '700',
+        color: '#1d4ed8',
+        marginBottom: 4,
+    },
+    statLabel: {
+        fontSize: 11,
+        color: '#6b7280',
+    },
+});
+
+const emptyStyles = StyleSheet.create({
+    container: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 32,
+        marginTop: 40,
+    },
+    emoji: {
+        fontSize: 64,
+        marginBottom: 16,
+    },
+    title: {
+        fontSize: 19,
+        fontWeight: '700',
+        color: '#1f2937',
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    text: {
+        fontSize: 13,
+        color: '#6b7280',
+        textAlign: 'center',
+        marginBottom: 24,
+        lineHeight: 20,
+    },
+    buttonRow: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+    },
+    button: {
+        backgroundColor: '#1d4ed8',
+        paddingHorizontal: 18,
+        paddingVertical: 11,
+        borderRadius: 10,
+        alignItems: 'center',
+    },
+    buttonText: {
+        color: '#fff',
+        fontWeight: '600',
+        fontSize: 14,
+    },
+});
+
+const modalStyles = StyleSheet.create({
+    overlay: {
+        flex: 1,
+        backgroundColor: 'rgba(15, 23, 42, 0.45)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 16,
+    },
+    content: {
+        backgroundColor: '#fff',
+        borderRadius: 18,
+        padding: 20,
+        width: '100%',
+        maxWidth: 420,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+    },
+    title: {
+        fontSize: 19,
+        fontWeight: '700',
+        color: '#111827',
+        marginBottom: 16,
+        textAlign: 'center',
+    },
+    input: {
+        borderWidth: 1,
+        borderColor: '#d1d5db',
+        padding: 12,
+        borderRadius: 10,
+        fontSize: 16,
+        marginBottom: 12,
+    },
+    timeButton: {
+        borderWidth: 1,
+        borderColor: '#d1d5db',
+        padding: 12,
+        borderRadius: 10,
+        marginBottom: 16,
+    },
+    buttonRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        gap: 12,
+    },
+    button: {
+        flex: 1,
+        paddingVertical: 14,
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    cancelButton: {
+        backgroundColor: '#e5e7eb',
+    },
+    cancelButtonText: {
+        color: '#374151',
+        fontWeight: '600',
+    },
+    addButton: {
+        backgroundColor: '#1d4ed8',
+    },
+    addButtonText: {
+        color: '#fff',
+        fontWeight: '600',
+    },
+    completeButton: {
+        backgroundColor: '#1d4ed8',
+    },
+    completeButtonText: {
+        color: '#fff',
+        fontWeight: '600',
+    },
+    taskName: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#111827',
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    taskInfo: {
+        fontSize: 13,
+        color: '#6b7280',
+        textAlign: 'center',
+        marginBottom: 16,
+    },
+    planContainer: {
+        backgroundColor: '#f3f4f6',
+        padding: 12,
+        borderRadius: 10,
+        marginBottom: 16,
+    },
+    planLabel: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#1d4ed8',
+        marginBottom: 4,
+    },
+    planText: {
+        fontSize: 14,
+        color: '#333',
+    },
+    notesInput: {
+        borderWidth: 1,
+        borderColor: '#ddd',
+        padding: 12,
+        borderRadius: 8,
+        fontSize: 14,
+        height: 80,
+        textAlignVertical: 'top',
+        marginBottom: 20,
+    },
+});
+
+export default DailyScheduleScreen;

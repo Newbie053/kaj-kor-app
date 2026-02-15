@@ -9,9 +9,10 @@ import {
 } from "react-native"
 import axios from "axios"
 import { router } from "expo-router"
+import { AUTH_API_BASE_URL } from "../constants/api";
 
 const API = axios.create({
-  baseURL: "http://192.168.10.116:5000/auth",
+  baseURL: AUTH_API_BASE_URL,
 })
 
 export default function Signup() {
