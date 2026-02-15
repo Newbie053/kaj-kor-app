@@ -8,6 +8,7 @@ import {
     Text,
     TextInput,
     Switch,
+    ScrollView,
     StyleSheet,
     Alert,
     Platform,
@@ -54,6 +55,8 @@ export default function DashboardLayout() {
     const [menuVisible, setMenuVisible] = useState(false);
     const [settingsVisible, setSettingsVisible] = useState(false);
     const [feedbackVisible, setFeedbackVisible] = useState(false);
+    const [guidelineVisible, setGuidelineVisible] = useState(false);
+    const [sessionChecked, setSessionChecked] = useState(false);
     const [notificationsEnabled, setNotificationsEnabled] = useState(false);
     const [reminderTime, setReminderTime] = useState(DEFAULT_REMINDER_TIME);
     const [showTimePicker, setShowTimePicker] = useState(false);
@@ -72,6 +75,26 @@ export default function DashboardLayout() {
             console.log("Logout error:", err)
         }
     }
+
+    useEffect(() => {
+        const ensureSession = async () => {
+            try {
+                const token = await AsyncStorage.getItem("token");
+                if (!token) {
+                    router.replace("/(auth)/login");
+                    return;
+                }
+            } catch (err) {
+                console.log("Dashboard layout token check error:", err);
+                router.replace("/(auth)/login");
+                return;
+            } finally {
+                setSessionChecked(true);
+            }
+        };
+
+        ensureSession();
+    }, [router]);
 
     useEffect(() => {
         const loadNotificationSettings = async () => {
@@ -183,6 +206,11 @@ export default function DashboardLayout() {
         setSettingsVisible(true);
     };
 
+    const openGuidelineFromMenu = () => {
+        setMenuVisible(false);
+        setGuidelineVisible(true);
+    };
+
     const logoutFromMenu = async () => {
         setMenuVisible(false);
         await handleLogout();
@@ -207,6 +235,14 @@ export default function DashboardLayout() {
         </View>
     )
 
+    if (!sessionChecked) {
+        return (
+            <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ color: "#666" }}>Loading...</Text>
+            </View>
+        );
+    }
+
     return (
         <View style={{ flex: 1 }}>
             <Header />
@@ -223,6 +259,10 @@ export default function DashboardLayout() {
                         onPress={() => setMenuVisible(false)}
                     />
                     <View style={[styles.menuCard, { top: 12 + Math.min(insets.top, 10) }]}>
+                        <TouchableOpacity style={styles.menuItem} onPress={openGuidelineFromMenu}>
+                            <Ionicons name="book-outline" size={20} color="#222" />
+                            <Text style={styles.menuItemText}>Guideline</Text>
+                        </TouchableOpacity>
                         <TouchableOpacity style={styles.menuItem} onPress={openFeedbackFromMenu}>
                             <Ionicons name="chatbubble-ellipses-outline" size={20} color="#222" />
                             <Text style={styles.menuItemText}>Feedback</Text>
@@ -234,6 +274,54 @@ export default function DashboardLayout() {
                         <TouchableOpacity style={styles.menuItem} onPress={logoutFromMenu}>
                             <Ionicons name="log-out-outline" size={20} color="#b42318" />
                             <Text style={[styles.menuItemText, styles.menuItemDanger]}>Logout</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+            <Modal
+                transparent
+                animationType="fade"
+                visible={guidelineVisible}
+                onRequestClose={() => setGuidelineVisible(false)}
+            >
+                <View style={styles.overlay}>
+                    <View style={[styles.modalCard, styles.guidelineCard]}>
+                        <Text style={styles.title}>App Guideline</Text>
+                        <ScrollView showsVerticalScrollIndicator={false}>
+                            <Text style={styles.guidelineHeading}>What this app is for</Text>
+                            <Text style={styles.guidelineBody}>
+                                Kaj-Kor helps you track progress for any long-term target like learning a skill,
+                                completing a course, reading a book, building a habit, or finishing a playlist.
+                            </Text>
+
+                            <Text style={styles.guidelineHeading}>How to use it</Text>
+                            <Text style={styles.guidelineBody}>
+                                1. Go to Target tab and create a new skill target with total days and daily time.
+                            </Text>
+                            <Text style={styles.guidelineBody}>
+                                2. Tap Plan Days to set a task for each day so Daily Schedule can show clear actions.
+                            </Text>
+                            <Text style={styles.guidelineBody}>
+                                3. In Daily tab, complete tasks to update streak, progress, and next-day plan flow.
+                            </Text>
+                            <Text style={styles.guidelineBody}>
+                                4. Use Progress tab to review completed, due, and missed targets.
+                            </Text>
+                            <Text style={styles.guidelineBody}>
+                                5. Use menu settings for reminders, feedback, and account logout.
+                            </Text>
+
+                            <Text style={styles.guidelineHeading}>Tips</Text>
+                            <Text style={styles.guidelineBody}>
+                                Keep daily plans short and clear. Mark tasks honestly every day. Use notifications so you
+                                do not miss your schedule.
+                            </Text>
+                        </ScrollView>
+                        <TouchableOpacity
+                            style={styles.closeButton}
+                            onPress={() => setGuidelineVisible(false)}
+                        >
+                            <Text style={styles.closeButtonText}>Close</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -353,9 +441,9 @@ export default function DashboardLayout() {
                     headerShown: false,
                     tabBarStyle: {
                         backgroundColor: theme.navBackground,
-                        height: 70 + Math.min(insets.bottom, 10),
+                        height: 74 + Math.max(insets.bottom, 12),
                         paddingTop: 10,
-                        paddingBottom: Math.min(insets.bottom, 8),
+                        paddingBottom: Math.max(insets.bottom, 12),
                         display: isDayPlanner ? "none" : "flex", // Hide on day-planner
                     },
                     tabBarActiveTintColor: theme.iconColorFocused,
@@ -454,11 +542,27 @@ const styles = StyleSheet.create({
         borderRadius: 14,
         padding: 18,
     },
+    guidelineCard: {
+        maxHeight: "75%",
+    },
     title: {
         fontSize: 18,
         fontWeight: "700",
         color: "#222",
         marginBottom: 14,
+    },
+    guidelineHeading: {
+        fontSize: 14,
+        fontWeight: "700",
+        color: "#222",
+        marginTop: 8,
+        marginBottom: 6,
+    },
+    guidelineBody: {
+        fontSize: 13,
+        color: "#444",
+        lineHeight: 20,
+        marginBottom: 6,
     },
     row: {
         flexDirection: "row",
